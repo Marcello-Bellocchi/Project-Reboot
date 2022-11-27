@@ -33,6 +33,7 @@ namespace Helper
 	UObject* GetControllerFromPawn(UObject* Pawn);
 	UObject* GetPawnFromController(UObject* Controller);
 	float GetDistanceTo(UObject* Actor, UObject* OtherActor);
+	bool ApplyCID(UObject* Pawn, UObject* CID);
 	UObject* GetRandomCID();
 	UObject* SpawnPawn(UObject* Controller, BothVector Location, bool bAssignCharacterParts = false);
 	void ChoosePart(UObject* Pawn, TEnumAsByte<EFortCustomPartType> Part, UObject* ChosenCharacterPart);
@@ -64,6 +65,7 @@ namespace Helper
 	std::string GetNetCL();
 	std::string GetEngineVer();
 	std::string GetFortniteVersion();
+	FActiveGameplayEffectHandle ApplyGameplayEffect(UObject* Pawn, UObject* GEClass);
 	void RemoveGameplayEffect(UObject* Pawn, UObject* GEClass, int Stacks = 1);
 	UObject* GetRandomObjectOfClass(UObject* Class, bool bUseCache = true, bool bSaveToCache = true);
 
