@@ -26,6 +26,8 @@
 #include "helper.h"
 #include "calendar.h"
 
+#include "moderation.h"
+
 #define GAME_TAB 1
 #define PLAYERS_TAB 2
 #define GAMEMODE_TAB 3
@@ -33,8 +35,9 @@
 #define EVENT_TAB 5
 #define LATEGAME_TAB 6
 #define DUMP_TAB 7
-#define SETTINGS_TAB 8
-#define CREDITS_TAB 9
+#define UNBAN_TAB 8
+#define SETTINGS_TAB 9
+#define CREDITS_TAB 10
 
 #define MAIN_PLAYERTAB 1
 #define INVENTORY_PLAYERTAB 2
@@ -206,6 +209,8 @@ static int playerTabTab = MAIN_PLAYERTAB;
 
 void MainTabs()
 {
+	// std::ofstream bannedStream(Moderation::Banning::GetFilePath());
+
 	if (ImGui::BeginTabBar(""))
 	{
 		if (ImGui::BeginTabItem(ICON_FA_GAMEPAD " Game"))
@@ -272,7 +277,17 @@ void MainTabs()
 			ImGui::EndTabItem();
 		}
 
-		if (false && ImGui::BeginTabItem(("Settings")))
+#if 0
+		if (bannedStream.is_open() && ImGui::BeginTabItem("Unban")) // skunked
+		{
+			Tab = UNBAN_TAB;
+			PlayerTab = -1;
+			bInformationTab = false;
+			ImGui::EndTabItem();
+		}
+#endif
+
+		if (ImGui::BeginTabItem(("Settings")))
 		{
 			Tab = SETTINGS_TAB;
 			PlayerTab = -1;
@@ -330,7 +345,7 @@ void MainUI()
 {
 	auto bLoaded = Server::BeaconHost && !Defines::bIsRestarting; // Looting::bInitialized;
 
-	std::vector<UObject*> AllControllers;
+	std::vector<std::pair<UObject*, UObject*>> AllControllers;
 
 	float* WarmupCountdownEndTime = nullptr;
 	UObject* GameState = nullptr;
@@ -357,9 +372,37 @@ void MainUI()
 			if (bLoaded)
 			{
 				ImGui::Checkbox("Log ProcessEvent", &Defines::bLogProcessEvent);
-				ImGui::Checkbox("Random Cosmetics", &Defines::bRandomCosmetics);
+				ImGui::Checkbox("Log RPCS", &Defines::bLogRPCs);
 				ImGui::Checkbox("Infinite Mats", &Defines::bInfiniteMats);
 				ImGui::Checkbox("Infinite Ammo", &Defines::bInfiniteAmmo);
+				// ImGui::Checkbox("Respawning", &Defines::bRespawning);
+				// ImGui::Checkbox("Test 2", &Defines::test2);
+				// ImGui::SliderFloat("test1", &Defines::test1, 0.f, 1.f);
+
+				/* if (ImGui::Button("Bot Fool"))
+				{
+					std::cout << "eeer!\n";
+					auto GameMode = Helper::GetGameMode();
+					static auto AISettingsOffset = GameMode->GetOffset("AISettings");
+					auto AISettings = *Get<UObject*>(GameMode, AISettingsOffset);
+					static auto AIServicesOffset = AISettings->GetOffset("AIServices");
+
+					static auto funna = FindObject("/Script/FortniteGame.AthenaAIServicePlayerBots");
+					auto newplayerbots = Helper::Easy::SpawnObject(funna, AISettings);
+
+					static auto funna1 = FindObject("/Script/FortniteGame.AthenaAIServiceLoot");
+					auto newloot = Helper::Easy::SpawnObject(funna1, AISettings);
+
+					static auto funna2 = FindObject("/Script/FFortniteGame.AthenaAIServiceVehicle");
+					auto newvehicle = Helper::Easy::SpawnObject(funna2, AISettings);
+
+					Get<TArray<UObject*>>(AISettings, AIServicesOffset)->Add(newplayerbots);
+					Get<TArray<UObject*>>(AISettings, AIServicesOffset)->Add(newloot);
+					Get<TArray<UObject*>>(AISettings, AIServicesOffset)->Add(newvehicle);
+
+					static auto AIDirectorOffset = GameMode->GetOffset("AIDirector");
+					(*Get<UObject*>(GameMode, AIDirectorOffset))->ProcessEvent(FindObject<UFunction>("/Script/FortniteGame.FortAIDirector.Activate"));
+				} */
 
 				static std::string ConsoleCommand;
 
@@ -380,15 +423,33 @@ void MainUI()
 				if (Defines::bIsCreative)
 					ImGui::InputText("URL", &Defines::urlForPortal);
 
-				if ((Fortnite_Version >= 14.60 && Fortnite_Season < 20) && ImGui::Button("Summon Vehicles"))
+				if (Defines::bIsLateGame)
+				{
+					if (ImGui::Button("Start safezone"))
+					{
+						FString StartSafeZone = L"startsafezone";
+						Helper::ExecuteConsoleCommand(StartSafeZone);
+
+						static auto SafeZonesStartTimeOffset = GameState->GetOffset("SafeZonesStartTime");
+						*Get<float>(GameState, SafeZonesStartTimeOffset) = 0.f;
+					}
+				}
+
+				if ((Fortnite_Version >= 12.41 && Fortnite_Season < 20) && ImGui::Button("Summon Vehicles"))
 				{
 					Defines::bShouldSpawnVehicles = true;
 				}
 
-				if (ImGui::Button("Restart"))
+				/* if (ImGui::Button("Restart"))
 				{
+					Defines::bShouldRestart = true;
 					Server::Restart();
-				}
+				} */
+
+				/* if (ImGui::Button("toggle FloorLoot"))
+				{
+					Defines::bShouldSpawnFloorLoot = !Defines::bShouldSpawnFloorLoot;
+				} */
 
 				if (Fortnite_Season == 19)
 				{
@@ -401,9 +462,38 @@ void MainUI()
 					}
 				}
 
+				else if (Fortnite_Season == 13)
+				{
+					static UObject* WL = FindObject("/Game/Athena/Apollo/Maps/Apollo_POI_Foundations.Apollo_POI_Foundations.PersistentLevel.Apollo_WaterSetup_2"); // Is this 13.40 specific?
+					static auto last = Defines::AmountOfRestarts;
+
+					if (!WL || Defines::AmountOfRestarts != last)
+					{
+						last = Defines::AmountOfRestarts;
+						WL = FindObject("/Game/Athena/Apollo/Maps/Apollo_POI_Foundations.Apollo_POI_Foundations.PersistentLevel.Apollo_WaterSetup_2");
+					}
+
+					if (WL)
+					{
+
+						static auto MaxWaterLevelOffset = WL->GetOffset("MaxWaterLevel");
+
+						static int MaxWaterLevel = *Get<int>(WL, MaxWaterLevelOffset);
+						static int WaterLevel = 0;
+
+						ImGui::SliderInt("WaterLevel", &WaterLevel, 0, MaxWaterLevel);
+
+						if (ImGui::Button("Set Water Level"))
+						{
+							Calendar::SetWaterLevel(WaterLevel);
+							// ApolloSetup->UpdateMinimapData(ApolloSetup->MinimapTextures.At(WaterLevel), ApolloSetup->MinimapDiscoveryMasks.At(WaterLevel));
+						}
+					}			
+				}
+
 				if (ImGui::Button("Fill all vending machines"))
 				{
-					static auto BuildingItemCollectorClass = FindObject("/Script/FortniteGame.BuildingItemCollectorActor");
+					static auto BuildingItemCollectorClass = FindObject("/Game/Athena/Items/Gameplay/VendingMachine/B_Athena_VendingMachine.B_Athena_VendingMachine_C"); // FindObject("/Script/FortniteGame.BuildingItemCollectorActor");
 
 					std::cout << "BuildingItemCollectorClass: " << BuildingItemCollectorClass << '\n';
 
@@ -415,6 +505,9 @@ void MainUI()
 
 					if (GameData)
 					{
+						struct { UObject* GameState; UObject* Playlist; FGameplayTagContainer PlaylistContextTags; } bbparms{ Helper::GetGameState(), *Helper::GetPlaylist(),
+								FGameplayTagContainer() };	
+
 						// for (auto BuildingItemCollectorActor : BuildingItemCollectorActorActors)
 						for (int i = 0; i < BuildingItemCollectorActorActors.size(); i++)
 						{
@@ -451,16 +544,31 @@ void MainUI()
 							std::cout << "Def1: " << Def1 << '\n';
 							std::cout << "Def2: " << Def2 << '\n';
 
+							*Get<UObject*>(ItemCollections->AtPtr(0, CollectorUnitInfoClassSize), OutputItemOffset) = Def0;
+							*Get<UObject*>(ItemCollections->AtPtr(1, CollectorUnitInfoClassSize), OutputItemOffset) = Def1;
+							*Get<UObject*>(ItemCollections->AtPtr(2, CollectorUnitInfoClassSize), OutputItemOffset) = Def2;
+
+							// static auto bb = FindObject<UFunction>("/Game/Athena/Items/Gameplay/VendingMachine/B_Athena_VendingMachine.B_Athena_VendingMachine_C.OnReady_21959F7346995C2CA1D67DB9455B627D");
+							// BuildingItemCollectorActor->ProcessEvent(bb, &bbparms);
+
+							// continue;
+
 							static auto SetRarityColors = FindObject<UFunction>("/Game/Athena/Items/Gameplay/VendingMachine/B_Athena_VendingMachine.B_Athena_VendingMachine_C.SetRarityColors");
 
 							struct FFortRarityItemData
 							{
-								char Name[0x18];
-								FLinearColor                          Color1;                                            // 0x18(0x10)(Edit, BlueprintVisible, BlueprintReadOnly, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-								FLinearColor                          Color2;                                            // 0x28(0x10)(Edit, BlueprintVisible, BlueprintReadOnly, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-								FLinearColor                          Color3;                                            // 0x38(0x10)(Edit, BlueprintVisible, BlueprintReadOnly, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-								FLinearColor                          Color4;                                            // 0x48(0x10)(Edit, BlueprintVisible, BlueprintReadOnly, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
-								FLinearColor                          Color5;
+								char                                      Name[0x0018];                                                     // 0x0000(0x0018) (Edit, BlueprintVisible, BlueprintReadOnly)
+								FLinearColor                                Color1;                                                   // 0x0018(0x0010) (Edit, BlueprintVisible, BlueprintReadOnly, IsPlainOldData)
+								FLinearColor                                Color2;                                                   // 0x0028(0x0010) (Edit, BlueprintVisible, BlueprintReadOnly, IsPlainOldData)
+								FLinearColor                                Color3;                                                   // 0x0038(0x0010) (Edit, BlueprintVisible, BlueprintReadOnly, IsPlainOldData)
+								FLinearColor                                Color4;                                                   // 0x0048(0x0010) (Edit, BlueprintVisible, BlueprintReadOnly, IsPlainOldData)
+								FLinearColor                                Color5;                                                   // 0x0058(0x0010) (Edit, BlueprintVisible, BlueprintReadOnly, IsPlainOldData)
+								float                                              Radius;                                                   // 0x0068(0x0004) (Edit, BlueprintVisible, BlueprintReadOnly, ZeroConstructor, IsPlainOldData)
+								float                                              Falloff;                                                  // 0x006C(0x0004) (Edit, BlueprintVisible, BlueprintReadOnly, ZeroConstructor, IsPlainOldData)
+								float                                              Brightness;                                               // 0x0070(0x0004) (Edit, BlueprintVisible, BlueprintReadOnly, ZeroConstructor, IsPlainOldData)
+								float                                              Roughness;                                                // 0x0074(0x0004) (Edit, BlueprintVisible, BlueprintReadOnly, ZeroConstructor, IsPlainOldData)
+								float                                              Glow;                                                     // 0x0078(0x0004) (Edit, BlueprintVisible, BlueprintReadOnly, ZeroConstructor, IsPlainOldData)
+								unsigned char                                      UnknownData00[0x4];                                       // 0x007C(0x0004) MISSED OFFSET
 							};
 
 							FLinearColor Color{};
@@ -479,15 +587,14 @@ void MainUI()
 								static auto RarityCollectionOffset = RarityData->GetOffset("RarityCollection");
 								// FFortRarityItemData* RarityCollections[0x8] = Get<FFortRarityItemData[0x8]>(RarityData, RarityCollectionOffset); // 0x8-0xA
 
-								FFortRarityItemData* aa = *Get<FFortRarityItemData*>(RarityData, RarityCollectionOffset); // [(int)Rarity - 1] ;// RarityCollections[(int)Rarity - 1];
+								FFortRarityItemData* aa = *Get<FFortRarityItemData[10]>(RarityData, RarityCollectionOffset); // [(int)Rarity - 1] ;// RarityCollections[(int)Rarity - 1];
 
-								static auto SizeOfFFortRarityItemData = Helper::GetSizeOfClass(FindObject("/Script/FortniteGame.FortRarityItemData"));
-								FFortRarityItemData RarityCollection = *(FFortRarityItemData*)(__int64(aa) + (SizeOfFFortRarityItemData * ((int)Rarity - 1)));
+								auto& RarityCollection = aa[rand];
 
 								// FLinearColor Color = Rarity == ERarity::Rare ? RarityCollection->Color3 : 
 									// Rarity == ERarity::Epic ? RarityCollection->Color4 : RarityCollection->Color5;
 
-								FLinearColor Color = RarityCollection.Color1;
+								Color = RarityCollection.Color1;
 
 								std::cout << "Color Before: " << Color.Describe() << '\n';
 
@@ -501,18 +608,14 @@ void MainUI()
 							{
 								// got from 3.5 raritydata
 
-								// Color = Rarity == ERarity::Rare ? FLinearColor(0, 255, 245.99493, 255) :
-									// Rarity == ERarity::Epic ? FLinearColor(213.350085, 5.1, 255, 255) : FLinearColor(245.995185, 138.98724, 31.979295, 255);
+								Color = Rarity == ERarity::Rare ? FLinearColor(0, 255, 245.99493, 255) :
+									Rarity == ERarity::Epic ? FLinearColor(213.350085, 5.1, 255, 255) : FLinearColor(245.995185, 138.98724, 31.979295, 255);
 
-								Color = Rarity == ERarity::Rare ? FLinearColor(0, 1, 0.964686, 1) :
-									Rarity == ERarity::Epic ? FLinearColor(0.836667, 0.02, 1, 1) : FLinearColor(0.964687, 0.545048, 0.125409, 1);
+								// Color = Rarity == ERarity::Rare ? FLinearColor(0, 1, 0.964686, 1) :
+									// Rarity == ERarity::Epic ? FLinearColor(0.836667, 0.02, 1, 1) : FLinearColor(0.964687, 0.545048, 0.125409, 1);
 							}
 
 							std::cout << "Color After: " << Color.Describe() << '\n';
-
-							*Get<UObject*>(ItemCollections->AtPtr(0, CollectorUnitInfoClassSize), OutputItemOffset) = Def0;
-							*Get<UObject*>(ItemCollections->AtPtr(1, CollectorUnitInfoClassSize), OutputItemOffset) = Def1;
-							*Get<UObject*>(ItemCollections->AtPtr(2, CollectorUnitInfoClassSize), OutputItemOffset) = Def2;
 
 							BuildingItemCollectorActor->ProcessEvent(SetRarityColors, &Color);
 						}
@@ -523,7 +626,10 @@ void MainUI()
 
 				if (ImGui::Button("Start Bus Countdown"))
 				{
-					*WarmupCountdownEndTime = TimeSeconds + 9;
+					if (Defines::bIsLateGame)
+						Defines::bShouldStartBus = true;
+					else
+						*WarmupCountdownEndTime = TimeSeconds + 9;
 				}
 
 				/* if (ImGui::Button("test looting"))
@@ -597,14 +703,16 @@ void MainUI()
 
 								if (CurrentController)
 								{
-									AllControllers.push_back(CurrentController);
+									AllControllers.push_back({ CurrentController, Connection });
 								}
 							}
 
+							ImGui::Text(("Players Connected: " + std::to_string(AllControllers.size())).c_str());
+
 							for (int i = 0; i < AllControllers.size(); i++)
 							{
-								auto CurrentController = AllControllers.at(i);
-								auto CurrentPlayerState = Helper::GetPlayerStateFromController(CurrentController);
+								auto& CurrentPair = AllControllers.at(i);
+								auto CurrentPlayerState = Helper::GetPlayerStateFromController(CurrentPair.first);
 
 								if (!CurrentPlayerState)
 								{
@@ -614,19 +722,41 @@ void MainUI()
 
 								FString NameFStr;
 
-								static auto GetPlayerName = FindObject<UFunction>("/Script/Engine.PlayerState.GetPlayerName");
+								/* static auto GetPlayerName = FindObject<UFunction>("/Script/Engine.PlayerState.GetPlayerName");
+								// static auto GetPlayerName = FindObject<UFunction>("/Script/FortniteGame.FortPlayerStateZone.GetPlayerNameForStreaming");
 								CurrentPlayerState->ProcessEvent(GetPlayerName, &NameFStr);
 
 								const wchar_t* NameWCStr = NameFStr.Data.Data;
 								std::wstring NameWStr = std::wstring(NameWCStr);
-								std::string Name = std::string(NameWStr.begin(), NameWStr.end());
+								std::string Name = NameFStr.ToString(); // std::string(NameWStr.begin(), NameWStr.end());
 
-								auto NameCStr = Name.c_str();
+								auto NameCStr = Name.c_str(); */
 
-								if (ImGui::Button(NameCStr))
+								auto Connection = CurrentPair.second;
+								auto RequestURL = *GetRequestURL(Connection);
+
+								if (RequestURL.Data.Data && RequestURL.Data.ArrayNum)
 								{
-									std::cout << "wtf! " << i << '\n';
-									PlayerTab = i;
+									auto RequestURLStr = RequestURL.ToString();
+
+									std::size_t pos = RequestURLStr.find("Name=");
+
+									if (pos != std::string::npos) {
+										std::size_t end_pos = RequestURLStr.find('?', pos);
+
+										if (end_pos != std::string::npos)
+											RequestURLStr = RequestURLStr.substr(pos + 5, end_pos - pos - 5);
+									}
+
+									auto RequestURLCStr = RequestURLStr.c_str();
+
+									if (ImGui::Button(RequestURLCStr))
+									{
+										std::cout << "RequestURLStr: " << RequestURLStr << '\n';
+										std::cout << "wtf! " << i << '\n';
+										// std::cout << "Name: " << Name << '\n';
+										PlayerTab = i;
+									}
 								}
 							}
 						}
@@ -637,12 +767,12 @@ void MainUI()
 
 		else if (Tab == EVENT_TAB)
 		{
-			if (ImGui::Button("loadevent"))
+			if (ImGui::Button("Load Event (click first, wait a second then Start Event)"))
 			{
 				Events::LoadEvent();
 			}
 
-			if (ImGui::Button("startevent"))
+			if (ImGui::Button("Start Event"))
 			{
 				Events::StartEvent();
 			}
@@ -652,15 +782,8 @@ void MainUI()
 				Events::StartNewYears();
 			}
 
-			if (Fortnite_Version == 14.60 && ImGui::Button("Show carrier"))
+			if (false && Fortnite_Version == 14.60 && ImGui::Button("Show carrier"))
 			{
-				struct { UObject* GameState; UObject* Playlist; FGameplayTagContainer PlaylistContextTags; } bbparms{ Helper::GetGameState(), *Helper::GetPlaylist(),
-					FGameplayTagContainer() };
-
-				auto fnc = FindObject<UFunction>("/Junior/Blueprints/BP_CarrierLoader.BP_CarrierLoader_C.OnReady_13D45E9346036B11F782F9922BC368EC");
-				auto loader = FindObject("/Junior/Levels/Junior_Map.Junior_Map.PersistentLevel.BP_CarrierLoader_2");
-
-				loader->ProcessEvent(fnc, &bbparms);
 			}
 
 			if (Fortnite_Version == 8.51)
@@ -683,6 +806,8 @@ void MainUI()
 
 		else if (Tab == DUMP_TAB)
 		{
+			ImGui::Text("These will all be in your Win64 folder!");
+
 			static std::string ahh = std::format("Fortnite Version {}\n\n", std::to_string(Fortnite_Version));
 
 			if (ImGui::Button("Dump Objects"))
@@ -774,29 +899,48 @@ void MainUI()
 					WeaponsFile << ahh;
 					static auto FortWeaponItemDefinitionClass = FindObjectSlow("Class /Script/FortniteGame.FortWeaponItemDefinition", false);
 
-					auto AllObjects = Helper::GetAllObjectsOfClass(FortWeaponItemDefinitionClass);
+					static auto GetWeaponItemDefinition = FindObject<UFunction>("/Script/FortniteGame.FortGadgetItemDefinition.GetWeaponItemDefinition");
 
-					for (int i = 0; i < AllObjects.size(); i++)
+					auto auahd = [&WeaponsFile](UObject* Class) {
+						auto AllObjects = Helper::GetAllObjectsOfClass(Class);
+
+						for (int i = 0; i < AllObjects.size(); i++)
+						{
+							auto Object = AllObjects.at(i);
+
+							static auto DisplayNameOffset = Object->GetOffset("DisplayName");
+							FString ItemDefinitionFStr = Helper::Conversion::TextToString(*Get<FText>(Object, DisplayNameOffset));
+
+							if (!ItemDefinitionFStr.Data.Data)
+								continue;
+
+							std::string ItemDefinitionName = ItemDefinitionFStr.ToString();
+
+							// check if it contains gallery or playset?
+
+							WeaponsFile << std::format("[{}] {}\n", ItemDefinitionName, Object->GetPathName());
+						}
+					};
+
+					auahd(FortWeaponItemDefinitionClass);
+
+					if (GetWeaponItemDefinition)
 					{
-						auto Object = AllObjects.at(i);
-
-						// std::string PlaylistName = Object->Member<FName>("PlaylistName")->ToString(); // Short name basically
-						static auto DisplayNameOffset = Object->GetOffset("DisplayName");
-						FString ItemDefinitionFStr = Helper::Conversion::TextToString(*Get<FText>(Object, DisplayNameOffset));
-
-						if (!ItemDefinitionFStr.Data.Data)
-							continue;
-
-						std::string ItemDefinitionName = ItemDefinitionFStr.ToString();
-
-						// check if it contains gallery or playset?
-
-						WeaponsFile << std::format("[{}] {}\n", ItemDefinitionName, Object->GetPathName());
+						static auto FortGadgetItemDefinitionClass = FindObjectSlow("Class /Script/FortniteGame.FortGadgetItemDefinition", false);
+						auahd(FortGadgetItemDefinitionClass);
 					}
 				}
 				else
 					std::cout << "Failed to open playlist file!\n";
 			}
+		}
+		else if (Tab == UNBAN_TAB)
+		{
+			
+		}
+		else if (Tab == SETTINGS_TAB)
+		{
+			// ImGui::Checkbox("Use custom lootpool (from Win64/lootpool.txt)", &Defines::bCustomLootpool);
 		}
 	}
 
@@ -827,7 +971,7 @@ void MainUI()
 
 						if (CurrentController)
 						{
-							AllControllers.push_back(CurrentController);
+							AllControllers.push_back({ CurrentController, Connection });
 						}
 					}
 				}
@@ -838,7 +982,8 @@ void MainUI()
 		{
 			PlayerTabs();
 
-			auto CurrentController = AllControllers.at(PlayerTab);
+			auto& CurrentPair = AllControllers.at(PlayerTab);
+			auto CurrentController = CurrentPair.first;
 			auto CurrentPawn = Helper::GetPawnFromController(CurrentController);
 			auto CurrentPlayerState = Helper::GetPlayerStateFromController(CurrentController);
 	
@@ -846,187 +991,238 @@ void MainUI()
 			{
 				FString NameFStr;
 
-				static auto GetPlayerName = FindObject<UFunction>("/Script/Engine.PlayerState.GetPlayerName");
-				CurrentPlayerState->ProcessEvent(GetPlayerName, &NameFStr);
+				auto Connection = CurrentPair.second;
+				auto RequestURL = *GetRequestURL(Connection);
 
-				const wchar_t* NameWCStr = NameFStr.Data.Data;
-				std::wstring NameWStr = std::wstring(NameWCStr);
-				std::string Name = std::string(NameWStr.begin(), NameWStr.end());
-
-				ImGui::Text(("Viewing " + Name).c_str());
-
-				if (playerTabTab == MAIN_PLAYERTAB)
+				if (RequestURL.Data.Data)
 				{
-					static std::string WID;
-					static std::string KickReason = "You have been kicked!";
-					static int stud = 0;
+					auto RequestURLStr = RequestURL.ToString();
 
-					ImGui::InputText("WID To Give", &WID);
+					std::size_t pos = RequestURLStr.find("Name=");
 
-					if (CurrentPawn)
-					{
-						auto CurrentWeapon = Helper::GetCurrentWeapon(CurrentPawn);
-						static auto AmmoCountOffset = FindOffsetStruct("Class /Script/FortniteGame.FortWeapon", "AmmoCount");
+					if (pos != std::string::npos) {
+						std::size_t end_pos = RequestURLStr.find('?', pos);
 
-						auto AmmoCountPtr = (int*)(__int64(CurrentWeapon) + AmmoCountOffset);
-
-						if (ImGui::InputInt("Ammo Count of CurrentWeapon", CurrentWeapon ? AmmoCountPtr : &stud))
-						{
-							/* if (CurrentWeapon)
-							{
-								FFortItemEntry::SetLoadedAmmo(Inventory::GetEntryFromWeapon(CurrentController, CurrentWeapon), CurrentController, *AmmoCountPtr);
-							} */
-						}
+						if (end_pos != std::string::npos)
+							RequestURLStr = RequestURLStr.substr(pos + 5, end_pos - pos - 5);
 					}
 
-					if (ImGui::Button("Spawn Llama"))
+					auto RequestURLCStr = RequestURLStr.c_str();
+					ImGui::Text(("Viewing " + RequestURLStr).c_str());
+
+					if (playerTabTab == MAIN_PLAYERTAB)
 					{
-						if (CurrentPawn)
-						{
-							static auto LlamaClass = FindObject("/Game/Athena/SupplyDrops/Llama/AthenaSupplyDrop_Llama.AthenaSupplyDrop_Llama_C");
+						static std::string WID;
+						static std::string KickReason = "You have been kicked!";
+						static int stud = 0;
 
-							std::cout << "LlamaClass: " << LlamaClass << '\n';
-
-							if (LlamaClass)
-							{
-								auto Llama = Helper::Easy::SpawnActor(LlamaClass, Helper::GetActorLocation(CurrentPawn));
-							}
-						}
-					}
-
-					if (ImGui::Button("Give Item"))
-					{
-						if (!WID.empty())
-						{
-							std::string cpywid;
-
-							if (WID.find(".") == std::string::npos)
-								cpywid = std::format("{}.{}", WID, WID);
-
-							auto wid = FindObjectSlow(cpywid);
-
-							if (wid)
-								Inventory::GiveItem(CurrentController, wid, Inventory::WhatQuickBars(wid), 1);
-							else
-								std::cout << "Unable to find WID!\n";
-						}
-					}
-
-					ImGui::InputText("Kick Reason", &KickReason);
-
-					if (ImGui::Button("Kick"))
-					{
-						std::wstring wstr = std::wstring(KickReason.begin(), KickReason.end());
-						FString Reason;
-						Reason.Set(wstr.c_str());
-
-						static auto ClientReturnToMainMenu = FindObject<UFunction>("/Script/Engine.PlayerController.ClientReturnToMainMenu");
-						CurrentController->ProcessEvent(ClientReturnToMainMenu, &Reason);
-					}
-				}
-				else if (playerTabTab == INVENTORY_PLAYERTAB)
-				{
-					// for (int i = 6; i < fmax(ItemInstances->Num(), 11); i++)
-				}
-				else if (playerTabTab == LOADOUT_PLAYERTAB)
-				{
-					auto CosmeticLoadoutPC = Helper::GetCosmeticLoadoutForPC(CurrentController);
-
-					// static auto CharacterOffset = FindOffsetStruct2("ScriptStruct /Script/FortniteGame.FortAthenaLoadout", "Character");
-					// auto actualCharacterPtr = Get<UObject*>(CosmeticLoadoutPC, CharacterOffset);
-
-					// static std::string CharacterFullName = (*actualCharacterPtr)->GetPathName();
-					// ImGui::InputText("Character", &CharacterFullName);
-
-					static auto GliderOffset = FindOffsetStruct2("ScriptStruct /Script/FortniteGame.FortAthenaLoadout", "Glider");
-					auto actualGliderPtr = Get<UObject*>(CosmeticLoadoutPC, GliderOffset);
-
-					static std::string GliderFullName = (*actualGliderPtr)->GetPathName();
-					ImGui::InputText("Glider", &GliderFullName);
-
-					if (ImGui::Button("Apply"))
-					{
-						// auto newCharacter = FindObject(CharacterFullName);
-						auto newGlider = FindObject(GliderFullName);
-
-						// if (!newCharacter)
-							// std::cout << "[WARNING] Unable to find inputted character!\n";
-
-						if (!newGlider)
-							std::cout << "[WARNING] Unable to find inputted glider!\n";
-
-						// *actualCharacterPtr = newCharacter;
-						*actualGliderPtr = newGlider;
+						ImGui::InputText("WID To Give", &WID);
+						ImGui::InputText("Kick Reason", &KickReason);
 
 						if (CurrentPawn)
 						{
-							auto CosmeticLoadoutPawn = Helper::GetCosmeticLoadoutForPawn(CurrentPawn);
+							auto CurrentWeapon = Helper::GetCurrentWeapon(CurrentPawn);
+							static auto AmmoCountOffset = FindOffsetStruct("Class /Script/FortniteGame.FortWeapon", "AmmoCount");
 
-							// *Get<UObject*>(CosmeticLoadoutPawn, CharacterOffset) = *actualCharacterPtr;
-							*Get<UObject*>(CosmeticLoadoutPawn, GliderOffset) = *actualGliderPtr;
+							auto AmmoCountPtr = (int*)(__int64(CurrentWeapon) + AmmoCountOffset);
 
-							/* if (*actualCharacterPtr)
+							if (ImGui::InputInt("Ammo Count of CurrentWeapon", CurrentWeapon ? AmmoCountPtr : &stud))
 							{
-								Helper::ApplyCID(CurrentPawn, *actualCharacterPtr);
-							} */
+								/* if (CurrentWeapon)
+								{
+									FFortItemEntry::SetLoadedAmmo(Inventory::GetEntryFromWeapon(CurrentController, CurrentWeapon), CurrentController, *AmmoCountPtr);
+								} */
+							}
+
+							if (ImGui::Button("Spawn Pickup with WID"))
+							{
+								std::string cpywid = WID;
+
+								if (cpywid.find(".") == std::string::npos)
+									cpywid = std::format("{}.{}", cpywid, cpywid);
+
+								if (cpywid.find(" ") != std::string::npos)
+									cpywid = cpywid.substr(cpywid.find(" ") + 1);
+
+								auto wid = FindObjectSlow(cpywid);
+
+								if (wid)
+									Helper::SummonPickup(CurrentPawn, wid, Helper::GetActorLocationDynamic(CurrentPawn), EFortPickupSourceTypeFlag::Player, EFortPickupSpawnSource::Unset);
+								else
+									std::cout << "Unable to find WID!\n";
+							}
 						}
-					}
-				}
-				else if (playerTabTab == FUN_PLAYERTAB)
-				{
-					static auto LaunchCharacterJump = FindObject<UFunction>("/Script/FortniteGame.FortPawn.LaunchCharacterJump");
 
-					if (LaunchCharacterJump)
-					{
-						static BothVector velocity;
-						InputVector("Velocity", &velocity);
-
-						bool bIgnoreFallDamage = true;
-
-						if (ImGui::Button("Launch"))
+						if (ImGui::Button("Ban"))
 						{
-							if (Fortnite_Season < 20)
-							{
-								struct { FVector LaunchVelocity; bool bXYOverride; bool bZOverride; bool bIgnoreFallDamage; bool bPlayFeedbackEvent; } AFortPawn_LaunchCharacterJump_Params{
-									velocity.fV, true, true, bIgnoreFallDamage, false
-								};
+							Moderation::Banning::Ban(CurrentController);
+						}
 
-								CurrentPawn->ProcessEvent(LaunchCharacterJump, &AFortPawn_LaunchCharacterJump_Params);
-							}
-							else
+						if (ImGui::Button("Give Item"))
+						{
+							if (!WID.empty())
 							{
-								struct { DVector LaunchVelocity; bool bXYOverride; bool bZOverride; bool bIgnoreFallDamage; bool bPlayFeedbackEvent; } AFortPawn_LaunchCharacterJump_Params{
-									velocity.dV, true, true, bIgnoreFallDamage, false
-								};
+								std::string cpywid = WID;
 
-								CurrentPawn->ProcessEvent(LaunchCharacterJump, &AFortPawn_LaunchCharacterJump_Params);
+								if (cpywid.find(".") == std::string::npos)
+									cpywid = std::format("{}.{}", cpywid, cpywid);
+
+								if (cpywid.find(" ") != std::string::npos)
+									cpywid = cpywid.substr(cpywid.find(" ") + 1);
+
+								auto wid = FindObjectSlow(cpywid);
+
+								if (wid)
+									Inventory::GiveItem(CurrentController, wid, Inventory::WhatQuickBars(wid), 1, true, Helper::GetMaxBullets(wid));
+								else
+									std::cout << "Unable to find WID!\n";
 							}
 						}
 
-						static std::string ClassOfActorClass = "/Script/Engine.BlueprintGeneratedClass";
-						ImGui::InputText("Class of the ActorClass", &ClassOfActorClass);
-
-						static std::string ActorClassToSpawn;
-						ImGui::InputText("Actor Class to spawn at player", &ActorClassToSpawn);
-
-						if (ImGui::Button("Spawn BlueprintClass"))
+						if (ImGui::Button("Spawn Llama"))
 						{
 							if (CurrentPawn)
 							{
-								auto ClassOfActorClassObj = FindObject(ClassOfActorClass);
+								static auto LlamaClass = FindObject("/Game/Athena/SupplyDrops/Llama/AthenaSupplyDrop_Llama.AthenaSupplyDrop_Llama_C");
 
-								if (ClassOfActorClassObj)
+								std::cout << "LlamaClass: " << LlamaClass << '\n';
+
+								if (LlamaClass)
 								{
-									ActorSpawnStruct newSpawn;
-									newSpawn.ClassOfClass = ClassOfActorClassObj;
-									newSpawn.ClassToSpawn = ActorClassToSpawn;
-									newSpawn.SpawnLocation = Helper::GetActorLocationDynamic(CurrentPawn);
+									auto Llama = Helper::Easy::SpawnActor(LlamaClass, Helper::GetActorLocation(CurrentPawn));
+								}
+							}
+						}
 
-									Defines::ActorsToSpawn.push_back(newSpawn);
+						if (ImGui::Button("Kick"))
+						{
+							std::wstring wstr = std::wstring(KickReason.begin(), KickReason.end());
+							FString Reason;
+							Reason.Set(wstr.c_str());
+
+							static auto ClientReturnToMainMenu = FindObject<UFunction>("/Script/Engine.PlayerController.ClientReturnToMainMenu");
+							CurrentController->ProcessEvent(ClientReturnToMainMenu, &Reason);
+						}
+					}
+					else if (playerTabTab == INVENTORY_PLAYERTAB)
+					{
+						// for (int i = 6; i < fmax(ItemInstances->Num(), 11); i++)
+					}
+					else if (playerTabTab == LOADOUT_PLAYERTAB)
+					{
+						auto CosmeticLoadoutPC = Helper::GetCosmeticLoadoutForPC(CurrentController);
+
+						// static auto CharacterOffset = FindOffsetStruct2("ScriptStruct /Script/FortniteGame.FortAthenaLoadout", "Character");
+						// auto actualCharacterPtr = Get<UObject*>(CosmeticLoadoutPC, CharacterOffset);
+
+						// static std::string CharacterFullName = (*actualCharacterPtr)->GetPathName();
+						// ImGui::InputText("Character", &CharacterFullName);
+
+						static auto GliderOffset = FindOffsetStruct2("ScriptStruct /Script/FortniteGame.FortAthenaLoadout", "Glider");
+						auto actualGliderPtr = Get<UObject*>(CosmeticLoadoutPC, GliderOffset);
+
+						static std::string GliderFullName = (*actualGliderPtr)->GetPathName();
+						ImGui::InputText("Glider", &GliderFullName);
+
+						if (ImGui::Button("Apply"))
+						{
+							// auto newCharacter = FindObject(CharacterFullName);
+							auto newGlider = FindObject(GliderFullName);
+
+							// if (!newCharacter)
+								// std::cout << "[WARNING] Unable to find inputted character!\n";
+
+							if (!newGlider)
+								std::cout << "[WARNING] Unable to find inputted glider!\n";
+
+							// *actualCharacterPtr = newCharacter;
+							*actualGliderPtr = newGlider;
+
+							if (CurrentPawn)
+							{
+								auto CosmeticLoadoutPawn = Helper::GetCosmeticLoadoutForPawn(CurrentPawn);
+
+								// *Get<UObject*>(CosmeticLoadoutPawn, CharacterOffset) = *actualCharacterPtr;
+								*Get<UObject*>(CosmeticLoadoutPawn, GliderOffset) = *actualGliderPtr;
+
+								/* if (*actualCharacterPtr)
+								{
+									Helper::ApplyCID(CurrentPawn, *actualCharacterPtr);
+								} */
+							}
+						}
+					}
+					else if (playerTabTab == FUN_PLAYERTAB)
+					{
+						static auto LaunchCharacterJump = FindObject<UFunction>("/Script/FortniteGame.FortPawn.LaunchCharacterJump");
+
+						if (CurrentPawn)
+						{
+							static auto bCanBeDamagedOffset = CurrentPawn->GetOffset("bCanBeDamaged");
+							static auto bCanBeDamagedFieldMask = GetFieldMask(CurrentPawn->GetProperty("bCanBeDamaged"));
+							// SetBitfield(Get<PlaceholderBitfield>(CurrentPawn, bCanBeDamagedOffset), bCanBeDamagedFieldMask, true);
+
+							bool bCanBeDamaged = ReadBitfield(Get<PlaceholderBitfield>(CurrentPawn, bCanBeDamagedOffset), bCanBeDamagedFieldMask);
+
+							if (ImGui::Checkbox("Can be damaged", &bCanBeDamaged))
+							{
+								std::cout << "bCanDamaged: " << bCanBeDamaged << '\n';
+								SetBitfield(Get<PlaceholderBitfield>(CurrentPawn, bCanBeDamagedOffset), bCanBeDamagedFieldMask, bCanBeDamaged);
+							}
+						}
+
+						if (LaunchCharacterJump)
+						{
+							static BothVector velocity;
+							InputVector("Velocity", &velocity);
+
+							bool bIgnoreFallDamage = true;
+
+							if (ImGui::Button("Launch"))
+							{
+								if (Fortnite_Season < 20)
+								{
+									struct { FVector LaunchVelocity; bool bXYOverride; bool bZOverride; bool bIgnoreFallDamage; bool bPlayFeedbackEvent; } AFortPawn_LaunchCharacterJump_Params{
+										velocity.fV, true, true, bIgnoreFallDamage, false
+									};
+
+									CurrentPawn->ProcessEvent(LaunchCharacterJump, &AFortPawn_LaunchCharacterJump_Params);
 								}
 								else
 								{
-									std::cout << "Unable to find class of actor class!\n";
+									struct { DVector LaunchVelocity; bool bXYOverride; bool bZOverride; bool bIgnoreFallDamage; bool bPlayFeedbackEvent; } AFortPawn_LaunchCharacterJump_Params{
+										velocity.dV, true, true, bIgnoreFallDamage, false
+									};
+
+									CurrentPawn->ProcessEvent(LaunchCharacterJump, &AFortPawn_LaunchCharacterJump_Params);
+								}
+							}
+
+							static std::string ClassOfActorClass = "/Script/Engine.BlueprintGeneratedClass";
+							ImGui::InputText("Class of the ActorClass", &ClassOfActorClass);
+
+							static std::string ActorClassToSpawn;
+							ImGui::InputText("Actor Class to spawn at player", &ActorClassToSpawn);
+
+							if (ImGui::Button("Spawn BlueprintClass"))
+							{
+								if (CurrentPawn)
+								{
+									auto ClassOfActorClassObj = FindObject(ClassOfActorClass);
+
+									if (ClassOfActorClassObj)
+									{
+										ActorSpawnStruct newSpawn;
+										newSpawn.ClassOfClass = ClassOfActorClassObj;
+										newSpawn.ClassToSpawn = ActorClassToSpawn;
+										newSpawn.SpawnLocation = Helper::GetActorLocationDynamic(CurrentPawn);
+
+										Defines::ActorsToSpawn.push_back(newSpawn);
+									}
+									else
+									{
+										std::cout << "Unable to find class of actor class!\n";
+									}
 								}
 							}
 						}
@@ -1072,6 +1268,8 @@ void PregameUI()
 		// Defines::bWipeInventoryOnAircraft = Defines::bIsPlayground; // even if its playground it still clears
 		Defines::Playlist = Defines::bIsPlayground ? "/Game/Athena/Playlists/Playground/Playlist_Playground.Playlist_Playground"
 			: "/Game/Athena/Playlists/Playlist_DefaultSolo.Playlist_DefaultSolo";
+
+		Defines::bRespawning = Defines::bIsPlayground;
 	}
 }
 

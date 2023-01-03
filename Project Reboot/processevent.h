@@ -14,17 +14,26 @@ bool ClientOnPawnDied(UObject* DeadController, UFunction* fn, void* Parameters);
 bool ServerAttemptAircraftJump(UObject* Controller, UFunction*, void* Parameters);
 bool commitExecuteWeapon(UObject* Ability, UFunction*, void* Parameters);
 bool OnGamePhaseChanged(UObject* MatchAnaylitics, UFunction*, void* Parameters);
+bool ServerUpdateVehicleInputStateUnreliable(UObject* Pawn, UFunction* Function, void* Parameters);
 bool ServerUpdatePhysicsParams(UObject* Vehicle, UFunction* Function, void* Parameters);
 bool ServerGiveCreativeItem(UObject* Controller, UFunction* Function, void* Parameters);
 bool ServerLoadingScreenDropped(UObject* Controller, UFunction* Function, void* Parameters);
 bool OnGatherOrInteract(UObject* CBGAParent, UFunction* Function, void* Parameters);
 bool ServerClientIsReadyToRespawn(UObject* Controller, UFunction*, void* Parameters);
 bool ServerPlayEmoteItem(UObject* Controller, UFunction*, void* Parameters);
+bool SpawnDefaultPawnFor(UObject* GameMode, UFunction*, void* Parameters);
+bool ServerSendZiplineState(UObject* Pawn, UFunction*, void* Parameters);
 bool HandleOwnerAsBuildingActorDestroyed(UObject* ObjectComponent, UFunction* func, void* Parameters);
 bool OnDeathServer(UObject* BuildingActor, UFunction* func, void* Parameters);
 bool OnAircraftExitedDropZone(UObject* GameMode, UFunction*, void* Parameters);
+bool ServerCheat(UObject* PlayerController, UFunction* Function, void* Parameters);
+bool PlayerCanRestart(UObject* GameMode, UFunction*, void* Parameters);
+bool ServerChoosePart(UObject* Pawn, UFunction*, void* Parameters);
+static bool UFuncRetTrue(UObject*, UFunction*, void* Parameters) { return true; }
+bool ServerUpdateStateSync(UObject* Vehicle, UFunction*, void* Parameters);
+bool onendabilitydance(UObject* Ability, UFunction*, void* Parameters);
+bool spawntoynotify(UObject* Ability, UFunction*, void* Parameters);
 // static bool ClientWasKicked(UObject* Controller, UFunction*, void* Parameters) { return true; }
-static bool ClientForceWorldInventoryUpdate(UObject* Controller, UFunction*, void* Parameters) { return true; }
 
 void AddHook(const std::string& str, std::function<bool(UObject*, UFunction*, void*)> func);
 void ProcessEventDetour(UObject* Object, UFunction* Function, void* Parameters);
@@ -49,4 +58,7 @@ namespace preoffsets
 	inline int KillerPawn = 0;
 	inline int KillerPlayerState = 0;
 	inline int TeamsLeft = 0;
+	inline int bInitialized = 0;
+	inline int WinningPlayerState = 0;
+	inline int DamageCauser = 0;
 }

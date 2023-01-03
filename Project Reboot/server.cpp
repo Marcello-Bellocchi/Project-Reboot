@@ -256,6 +256,7 @@ bool Server::Listen(int Port)
 void Server::Restart()
 {
 	Defines::AmountOfRestarts++;
+	Defines::bIsRestarting = true;
 	
 	std::cout << MH_StatusToString(MH_DisableHook((PVOID)TickFlushAddress)) << '\n';
 	std::cout << MH_StatusToString(MH_DisableHook((PVOID)KickPlayerAddress)) << '\n';
@@ -268,6 +269,8 @@ void Server::Restart()
 		Helper::DestroyActor(BeaconHost);
 
 	BeaconHost = nullptr;
+
+	// Sleep(5000);
 
 	static auto SwitchLevel = FindObject<UFunction>("/Script/Engine.PlayerController.SwitchLevel");
 
@@ -282,7 +285,6 @@ void Server::Restart()
 	Teams::NextTeamIndex = Teams::StartingTeamIndex;
 	Teams::CurrentNumPlayersOnTeam = 0;
 
-	Defines::bIsRestarting = true;
 	Defines::bReadyForStartMatch = true;
 }
 
@@ -294,9 +296,113 @@ __int64 Server::Hooks::NoReservation(__int64* a1, __int64 a2, char a3, __int64 a
 	return 0;
 }
 
+struct FNetViewer
+{
+	UObject** GetConnection()
+	{
+		static auto Viewer_ConnectionOffset = FindOffsetStruct("ScriptStruct /Script/Engine.NetViewer", "Connection");
+		return (UObject**)(__int64(this) + Viewer_ConnectionOffset);
+	}
+
+	UObject** GetInViewer()
+	{
+		static auto Viewer_InViewerOffset = FindOffsetStruct("ScriptStruct /Script/Engine.NetViewer", "InViewer");
+		return (UObject**)(__int64(this) + Viewer_InViewerOffset);
+	}
+
+	UObject** GetViewTarget()
+	{
+		static auto Viewer_ViewTargetOffset = FindOffsetStruct("ScriptStruct /Script/Engine.NetViewer", "ViewTarget");
+		return (UObject**)(__int64(this) + Viewer_ViewTargetOffset);
+	}
+
+	FVector* GetViewLocation()
+	{
+		static auto Viewer_ViewLocationOffset = FindOffsetStruct("ScriptStruct /Script/Engine.NetViewer", "ViewLocation");
+		return (FVector*)(__int64(this) + Viewer_ViewLocationOffset);
+	}
+
+	FVector* GetViewDir()
+	{
+		static auto Viewer_ViewDirOffset = FindOffsetStruct("ScriptStruct /Script/Engine.NetViewer", "ViewDir");
+		return (FVector*)(__int64(this) + Viewer_ViewDirOffset);
+	}
+};
+
+FNetViewer* __fastcall NetViewerConstructorDetour2(FNetViewer* NetViewer, UObject* InController)
+{
+	if (InController)
+	{
+		static auto PC_GetViewTarget = FindObject<UFunction>("/Script/Engine.Controller.GetViewTarget");
+		UObject* PCViewTarget = nullptr;
+		InController->ProcessEvent(PC_GetViewTarget, &PCViewTarget);
+
+		*NetViewer->GetViewTarget() = PCViewTarget;
+
+		if (*NetViewer->GetViewTarget())
+		{
+			*NetViewer->GetViewLocation() = Helper::GetActorLocation(*NetViewer->GetViewTarget());
+		}
+
+		FRotator ViewRotation = Helper::GetControlRotation(InController);
+	
+		// GetPlayerViewpoint
+
+		if (PCViewTarget)
+		{
+			*NetViewer->GetViewLocation() = Helper::GetActorLocation(PCViewTarget);
+			ViewRotation = Helper::GetActorRotation(PCViewTarget);
+		}
+
+		*NetViewer->GetViewDir() = ViewRotation.Vector();
+	}
+
+	return NetViewer;
+}
+
+UObject* GetViewTargetCameraManager(UObject* PlayerCameraManager)
+{
+	return nullptr;
+}
+
+UObject* GetViewTargetPlayerController(UObject* PC)
+{
+	static auto PlayerCameraManagerOffset = PC->GetOffset("PlayerCameraManager");
+	auto PlayerCameraManager = *Get<UObject*>(PC, PlayerCameraManagerOffset);
+
+	UObject* CameraManagerViewTarget = PlayerCameraManager ? GetViewTargetCameraManager(PlayerCameraManager) : nullptr;
+
+	return CameraManagerViewTarget ? CameraManagerViewTarget : PC;
+}
+
+void __fastcall GetPlayerViewPointDetour(UObject* pc, FVector* a2, FRotator* a3)
+{
+	/* static auto PlayerCameraManagerOffset = pc->GetOffset("PlayerCameraManager");
+	auto PlayerCameraManager = *Get<UObject*>(pc, PlayerCameraManagerOffset);
+
+	if (PlayerCameraManager
+		// PlayerCameraManager->GetCameraCacheTime() > 0.f // Whether camera was updated at least once)
+		)
+	{
+		GetCameraViewpoint(PlayerCameraManager, *a2, *a3);
+	}
+	else */
+	{
+		static auto PC_GetViewTarget = FindObject<UFunction>("/Script/Engine.Controller.GetViewTarget");
+		UObject* ViewTarget = nullptr;
+		pc->ProcessEvent(PC_GetViewTarget, &ViewTarget);
+
+		if (ViewTarget)
+		{
+			*a2 = Helper::GetActorLocation(ViewTarget);
+			*a3 = Helper::GetActorRotation(ViewTarget);
+		}
+	}
+}
+
 __int64 (__fastcall* NetViewerConstructorO)(__int64 NetViewer, UObject* Connection);
 
-__int64 __fastcall NetViewerConstructorDetour(__int64 NetViewer, UObject* Connection)
+FNetViewer* __fastcall NetViewerConstructorDetour(FNetViewer* NetViewer, UObject* Connection)
 {
 	// dude 17.50 Connection != UNetConnection or something
 	
@@ -305,38 +411,39 @@ __int64 __fastcall NetViewerConstructorDetour(__int64 NetViewer, UObject* Connec
 	static auto Connection_OwningActorOffset = FindOffsetStruct("Class /Script/Engine.NetConnection", "OwningActor");
 
 	auto Connection_ViewTarget = *(UObject**)(__int64(Connection) + Connection_ViewTargetOffset);
-	auto Connection_PlayerController = *(UObject**)(__int64(Connection) + Connection_PlayerControllerOffset);
+	auto ViewingController = *(UObject**)(__int64(Connection) + Connection_PlayerControllerOffset);
 	auto Connection_OwningActor = *(UObject**)(__int64(Connection) + Connection_OwningActorOffset);
-
-	if (!Connection_OwningActor || !(!Connection_PlayerController || (Connection_PlayerController == Connection_OwningActor)))
-		return NetViewer;
 
 	static auto Viewer_ConnectionOffset = FindOffsetStruct("ScriptStruct /Script/Engine.NetViewer", "Connection");
 	*(UObject**)(__int64(NetViewer) + Viewer_ConnectionOffset) = Connection;
 
 	static auto Viewer_InViewerOffset = FindOffsetStruct("ScriptStruct /Script/Engine.NetViewer", "InViewer");
-	*(UObject**)(__int64(NetViewer) + Viewer_InViewerOffset) = Connection_PlayerController ? Connection_PlayerController : Connection_OwningActor;
+	*(UObject**)(__int64(NetViewer) + Viewer_InViewerOffset) = ViewingController ? ViewingController : Connection_OwningActor;
+
+	static auto Viewer_ViewLocationOffset = FindOffsetStruct("ScriptStruct /Script/Engine.NetViewer", "ViewLocation");
+	*(FVector*)(__int64(NetViewer) + Viewer_ViewLocationOffset) = Helper::GetActorLocation(ViewingController);
 
 	static auto Viewer_ViewTargetOffset = FindOffsetStruct("ScriptStruct /Script/Engine.NetViewer", "ViewTarget");
 	auto Viewer_ViewTarget = (UObject**)(__int64(NetViewer) + Viewer_ViewTargetOffset);
 	*Viewer_ViewTarget = Connection_ViewTarget;
 
-	static auto Viewer_ViewLocationOffset = FindOffsetStruct("ScriptStruct /Script/Engine.NetViewer", "ViewLocation");
-	auto Viewer_ViewLocation = (FVector*)(__int64(NetViewer) + Viewer_ViewLocationOffset);
+	if (!Connection_OwningActor)
+		return NetViewer;
 
-	if (*Viewer_ViewTarget)
-		*(FVector*)(__int64(NetViewer) + Viewer_ViewLocationOffset) = Helper::GetActorLocation(*Viewer_ViewTarget);
+	if (!(!ViewingController || (ViewingController == Connection_OwningActor)))
+		return NetViewer;
 
-	float CP, SP, CY, SY;
+	*(FVector*)(__int64(NetViewer) + Viewer_ViewLocationOffset) = Helper::GetActorLocation(*Viewer_ViewTarget);
 
-	FRotator ViewRotation = (*Viewer_ViewTarget) ? Helper::GetActorRotation(*Viewer_ViewTarget) : FRotator();
+	if (ViewingController)
+	{
+		FRotator ViewRotation = Helper::GetControlRotation(ViewingController);
 
-	SinCos(&SP, &CP, DegreesToRadians(ViewRotation.Pitch));
-	SinCos(&SY, &CY, DegreesToRadians(ViewRotation.Yaw));
+		GetPlayerViewPointDetour(ViewingController, (FVector*)(__int64(NetViewer) + Viewer_ViewLocationOffset), &ViewRotation);
 
-	static auto Viewer_ViewDirOffset = FindOffsetStruct("ScriptStruct /Script/Engine.NetViewer", "ViewDir");
-
-	*(FVector*)(__int64(NetViewer) + Viewer_ViewDirOffset) = FVector(CP * CY, CP * SY, SP);
+		static auto Viewer_ViewDirOffset = FindOffsetStruct("ScriptStruct /Script/Engine.NetViewer", "ViewDir");
+		*(FVector*)(__int64(NetViewer) + Viewer_ViewDirOffset) = ViewRotation.Vector();
+	}
 
 	return NetViewer;
 }
@@ -481,7 +588,28 @@ void CheckViewTarget(FTViewTarget viewTarget, UObject* OwningController)
 	}
 }
 
+struct FMinimalViewInfoUD
+{
+public:
+	FVector                               Location;                                          // 0x0(0xC)(Edit, BlueprintVisible, IsPlainOldData, NoDestructor, HasGetValueTypeHash, NativeAccessSpecifierPublic)
+	FRotator                              Rotation;
+};
 
+FMinimalViewInfoUD GetCameraCacheView(UObject* PlayerCameraManager)
+{
+	static auto CameraCachePrivateOffset = PlayerCameraManager->GetOffset("CameraCachePrivate");
+	auto CameraCachePrivate = Get<void>(PlayerCameraManager, CameraCachePrivateOffset);
+
+	static auto POVOffset = FindOffsetStruct2("ScriptStruct /Script/Engine.CameraCacheEntry", "POV");
+	return *(FMinimalViewInfoUD*)(__int64(CameraCachePrivate) + POVOffset);
+}
+
+void GetCameraViewpoint(UObject* PlayerCameraManager, FVector& OutCamLoc, FRotator& OutCamRot)
+{
+	const FMinimalViewInfoUD& CurrentPOV = GetCameraCacheView(PlayerCameraManager);
+	OutCamLoc = CurrentPOV.Location;
+	OutCamRot = CurrentPOV.Rotation;
+}
 
 void Server::Hooks::Initialize()
 {
@@ -505,7 +633,7 @@ void Server::Hooks::Initialize()
 
 	// Maybe: 48 83 EC 28 48 8B 01 FF 90 ? ? ? ? 84 C0
 
-	if (true)
+	// if (false)
 	{
 		if (false)
 		{
@@ -516,7 +644,7 @@ void Server::Hooks::Initialize()
 			std::cout << MH_StatusToString(MH_CreateHook((PVOID)sig, Server::Hooks::GetViewTarget, nullptr)) << '\n';
 			std::cout << MH_StatusToString(MH_EnableHook((PVOID)sig)) << '\n';
 		}
-		else // if (Fortnite_Version < 17.50)
+		else if (true) // if (Fortnite_Version < 17.50)
 		{
 			auto sig = Memory::FindPattern("48 89 5C 24 ? 48 89 74 24 ? 57 48 83 EC 40 48 89 11 48 8B D9 48 8B 42 30 48 85 C0 75 07 48 8B 82 ? ? ? ? 48");
 
@@ -526,14 +654,21 @@ void Server::Hooks::Initialize()
 			if (Fortnite_Version >= 17.50)
 				sig = Memory::FindPattern("48 89 5C 24 ? 48 89 74 24 ? 57 48 83 EC 40 48 89 11 45");
 
+			if (!sig)
+				sig = Memory::FindPattern("48 89 5C 24 ? 48 89 74 24 ? 57 48 83 EC 50 48 89 11 45 33 C0 48 8B 42 30 48 8B D9 48 85 C0 75 07 48 8B 82 ? ? ? ? 48 89 41 08 48 8D 79 18 48"); // 20.40
+
 			std::cout << "sig: " << sig << '\n';
 
 			std::cout << MH_StatusToString(MH_CreateHook((PVOID)sig, NetViewerConstructorDetour, (PVOID*)&NetViewerConstructorO)) << '\n';
 			std::cout << MH_StatusToString(MH_EnableHook((PVOID)sig)) << '\n';
 		}
-	}
-	else
-	{
+		else if (false)
+		{
+			auto sig = Memory::FindPattern("48 89 5C 24 ? 48 89 74 24 ? 55 41 56 41 57 48 8B EC 48 83 EC 40 48 8B F2 48 C7 45 ? ? ? ? ? 48 8B 55 38 4D 8B F0 48 8B D9 45 33 FF E8 ? ? ? ? 84");
+
+			MH_CreateHook((PVOID)sig, GetPlayerViewPointDetour, nullptr);
+			MH_EnableHook((PVOID)sig);
+		}
 	}
 }
 
@@ -612,66 +747,113 @@ void Server::Hooks::TickFlush(UObject* thisNetDriver, float DeltaSeconds)
 		}
 	}
 
+	/*
+	if (Defines::bShouldRestart)
+	{
+		Defines::bShouldRestart = false;
+
+		Defines::AmountOfRestarts++;
+		Defines::bIsRestarting = true;
+
+		std::cout << MH_StatusToString(MH_DisableHook((PVOID)TickFlushAddress)) << '\n';
+		std::cout << MH_StatusToString(MH_DisableHook((PVOID)KickPlayerAddress)) << '\n';
+		std::cout << MH_StatusToString(MH_DisableHook((PVOID)ValidationFailureAddress)) << '\n';
+
+		if (Engine_Version < 424)
+			std::cout << MH_StatusToString(MH_DisableHook((PVOID)NoReserveAddress)) << '\n';
+
+		if (BeaconHost)
+			Helper::DestroyActor(BeaconHost);
+
+		BeaconHost = nullptr;
+
+		// Sleep(5000);
+
+		static auto RestartGame = FindObject<UFunction>("/Script/Engine.GameMode.RestartGame");
+		Helper::GetGameMode()->ProcessEvent(RestartGame);
+
+		Teams::NextTeamIndex = Teams::StartingTeamIndex;
+		Teams::CurrentNumPlayersOnTeam = 0;
+
+		Defines::bReadyForStartMatch = true;
+	}
+	*/
+
+	if (Defines::bShouldStartBus)
+	{
+		Defines::bShouldStartBus = false;
+		FString cmd = L"startaircraft";
+
+		Helper::ExecuteConsoleCommand(cmd);
+	}
+
 	if (Defines::bShouldSpawnForagedItems)
 	{
 		Defines::bShouldSpawnForagedItems = false;
 
 		static auto BGAConsumableSpawnerClass = FindObject("/Script/FortniteGame.BGAConsumableSpawner");
 
-		auto AllActors = Helper::GetAllActorsOfClass(BGAConsumableSpawnerClass);
-
-		std::cout << "Spawning: " << AllActors.Num() << " foraged items!\n";
-
-		for (int i = 0; i < AllActors.Num(); i++)
+		if (BGAConsumableSpawnerClass)
 		{
-			auto AllActor = AllActors.At(i);
+			auto AllActors = Helper::GetAllActorsOfClass(BGAConsumableSpawnerClass);
 
-			if (AllActor)
+			std::cout << "Spawning: " << AllActors.Num() << " foraged items!\n";
+
+			for (int i = 0; i < AllActors.Num(); i++)
 			{
-				static auto SpawnLootTierGroupOffset = AllActor->GetOffset("SpawnLootTierGroup");
-				auto SpawnLootTierGroupFName = Get<FName>(AllActor, SpawnLootTierGroupOffset);
+				auto AllActor = AllActors.At(i);
 
-				auto SpawnLootTierGroup = SpawnLootTierGroupFName->ToString();
-
-				std::cout << "SpawnLootTierGroup: " << SpawnLootTierGroup << '\n';
-
-				auto Location = Helper::GetCorrectLocation(AllActor);
-				auto Rotation = Helper::GetActorRotation(AllActor);
-
-				static auto BGACWID = FindObject("/Script/FortniteGame.BGAConsumableWrapperItemDefinition");
-
-				/*
-
-				auto LootDrops = Looting::PickLootDrops(SpawnLootTierGroup);
-
-				// std::cout << "LootDrops: " << LootDrops.size() << '\n';
-
-				for (auto& LootDrop : LootDrops)
+				if (AllActor)
 				{
-					static auto bgafrift = FindObject("/Game/Athena/Items/ForagedItems/Rift/ConsumableVersion/Athena_Foraged_Rift.Athena_Foraged_Rift");
+					static auto SpawnLootTierGroupOffset = AllActor->GetOffset("SpawnLootTierGroup");
+					auto SpawnLootTierGroupFName = Get<FName>(AllActor, SpawnLootTierGroupOffset);
 
-					UObject* ConsumableClass = nullptr;
+					auto SpawnLootTierGroup = SpawnLootTierGroupFName->ToString();
 
-					if (LootDrop.first == bgafrift) // we love rifts
+					std::cout << "SpawnLootTierGroup: " << SpawnLootTierGroup << '\n';
+
+					auto Location = Helper::GetCorrectLocation(AllActor);
+					auto Rotation = Helper::GetActorRotation(AllActor);
+
+					// static auto BGACWID = FindObject("/Script/FortniteGame.BGAConsumableWrapperItemDefinition");
+
+#ifdef TEST_NEW_LOOTING
+					auto LootDrops = Looting::PickLootDrops(SpawnLootTierGroup);
+
+					std::cout << "LootDrops: " << LootDrops.size() << '\n';
+
+					for (auto& LootDrop : LootDrops)
 					{
-						static auto riftportal = load(Helper::GetBGAClass(), "/Game/Athena/Items/ForagedItems/Rift/BGA_RiftPortal_Athena.BGA_RiftPortal_Athena_C");
-						ConsumableClass = riftportal;
-					}
-					else
-					{
+						static auto bgafrift = FindObject("/Game/Athena/Items/ForagedItems/Rift/ConsumableVersion/Athena_Foraged_Rift.Athena_Foraged_Rift");
+
+						UObject* ConsumableClass = nullptr;
+
 						static auto ConsumableClassOffset = LootDrop.first->GetOffset("ConsumableClass");
-						ConsumableClass = Get<TSoftObjectPtr>(LootDrop.first, ConsumableClassOffset)->Get(Helper::GetBGAClass());
-					}
+						auto ConsumableClassSoft = Get<TSoftObjectPtr>(LootDrop.first, ConsumableClassOffset);
 
-					if (ConsumableClass)
-					{
-						// std::cout << "found class!\n";
+						if (LootDrop.first == bgafrift) // we love rifts
+						{
+							static auto riftportal = load(Helper::GetBGAClass(), "/Game/Athena/Items/ForagedItems/Rift/BGA_RiftPortal_Athena.BGA_RiftPortal_Athena_C");
+							ConsumableClass = riftportal;
+						}
+						else
+						{
+							ConsumableClass = ConsumableClassSoft->Get(Helper::GetBGAClass());
+						}
 
-						Helper::Easy::SpawnActor(ConsumableClass, Location, Rotation);
+						if (ConsumableClass)
+						{
+							std::cout << "class: " << ConsumableClass->GetFullName() << '\n';
+
+							Helper::Easy::SpawnActor(ConsumableClass, Location, Rotation);
+						}
+						else
+						{
+							std::cout << "unable to find: " << ConsumableClassSoft->ObjectID.AssetPathName.ToString() << '\n';
+						}
 					}
+#endif
 				}
-
-				*/
 			}
 		}
 	}
@@ -680,7 +862,7 @@ void Server::Hooks::TickFlush(UObject* thisNetDriver, float DeltaSeconds)
 	{
 		Defines::bShouldSpawnVehicles = false;
 
-		static auto FortVehicleSpawnerClass = FindObject("/Game/Athena/DrivableVehicles/Athena_VehicleSpawner.Athena_VehicleSpawner_C");
+		static auto FortVehicleSpawnerClass = FindObject("/Script/FortniteGame.FortAthenaVehicleSpawner"); // FindObject("/Game/Athena/DrivableVehicles/Athena_VehicleSpawner.Athena_VehicleSpawner_C");
 
 		auto spawnerClass = FortVehicleSpawnerClass;
 
@@ -699,59 +881,66 @@ void Server::Hooks::TickFlush(UObject* thisNetDriver, float DeltaSeconds)
 
 			static auto FortVehicleItemDefVariantsOffset = Spawner->GetOffset("FortVehicleItemDefVariants");
 
-			struct FVehicleWeightedDef
-			{
-				TSoftObjectPtr VehicleItemDef;
-				FScalableFloat                              Weight;                                                   // 0x0028(0x0020) (Edit, BlueprintVisible, BlueprintReadOnly)
-			};
-
-			auto FortVehicleItemDefVariants = Get<TArray<FVehicleWeightedDef>>(Spawner, FortVehicleItemDefVariantsOffset);
-
-			// std::cout << "FortVehicleItemDefVariants: " << FortVehicleItemDefVariants->Num() << '\n';
+			bool aa = true;
 
 			static auto VIDClass = FindObject("/Script/FortniteGame.FortVehicleItemDefinition");
 
-			if (FortVehicleItemDefVariants->Num() > 0)
+			if (FortVehicleItemDefVariantsOffset != 0)
 			{
-				auto first = FortVehicleItemDefVariants->At(0);
-
-				auto AssetPathName = first.VehicleItemDef.ObjectID.AssetPathName;
-
-				// std::cout << "AssetPathName: " << AssetPathName.ComparisonIndex << '\n';
-
-				if (!AssetPathName.ComparisonIndex)
-					continue;
-
-				auto VehicleItemDef = load(VIDClass, AssetPathName.ToString());
-
-				// std::cout << "VehicleItemDef: " << VehicleItemDef << '\n';
-
-				if (VehicleItemDef)
+				struct FVehicleWeightedDef
 				{
-					static auto VehicleActorClassOffset = VehicleItemDef->GetOffset("VehicleActorClass");
+					TSoftObjectPtr VehicleItemDef;
+					FScalableFloat Weight;                                                   // 0x0028(0x0020) (Edit, BlueprintVisible, BlueprintReadOnly)
+				};
 
-					auto VehicleActorClassSoft = Get<TSoftObjectPtr>(VehicleItemDef, VehicleActorClassOffset);
+				auto FortVehicleItemDefVariants = Get<TArray<FVehicleWeightedDef>>(Spawner, FortVehicleItemDefVariantsOffset);
 
-					auto assetpathname = VehicleActorClassSoft->ObjectID.AssetPathName;
+				// std::cout << "FortVehicleItemDefVariants: " << FortVehicleItemDefVariants->Num() << '\n';
 
-					// std::cout << "assetpathname sof: " << assetpathname.ComparisonIndex << '\n';
+				if (FortVehicleItemDefVariants->Num() > 0)
+				{
+					aa = false;
+					auto first = FortVehicleItemDefVariants->At(0);
 
-					if (!assetpathname.ComparisonIndex)
+					auto AssetPathName = first.VehicleItemDef.ObjectID.AssetPathName;
+
+					// std::cout << "AssetPathName: " << AssetPathName.ComparisonIndex << '\n';
+
+					if (!AssetPathName.ComparisonIndex)
 						continue;
 
-					auto VehicleActorClass = load(Helper::GetBGAClass(), assetpathname.ToString());
+					auto VehicleItemDef = load(VIDClass, AssetPathName.ToString());
 
-					// std::cout << "VehicleActorClass: " << VehicleActorClass << '\n';
+					// std::cout << "VehicleItemDef: " << VehicleItemDef << '\n';
 
-					if (!VehicleActorClass)
-						continue;
+					if (VehicleItemDef)
+					{
+						static auto VehicleActorClassOffset = VehicleItemDef->GetOffset("VehicleActorClass");
 
-					auto SpawnerLoc = Helper::GetActorLocation(Spawner);
+						auto VehicleActorClassSoft = Get<TSoftObjectPtr>(VehicleItemDef, VehicleActorClassOffset);
 
-					Helper::Easy::SpawnActor(VehicleActorClass, SpawnerLoc, Helper::GetActorRotation(Spawner));
+						auto assetpathname = VehicleActorClassSoft->ObjectID.AssetPathName;
+
+						// std::cout << "assetpathname sof: " << assetpathname.ComparisonIndex << '\n';
+
+						if (!assetpathname.ComparisonIndex)
+							continue;
+
+						auto VehicleActorClass = load(Helper::GetBGAClass(), assetpathname.ToString());
+
+						// std::cout << "VehicleActorClass: " << VehicleActorClass << '\n';
+
+						if (!VehicleActorClass)
+							continue;
+
+						auto SpawnerLoc = Helper::GetActorLocation(Spawner);
+
+						Helper::Easy::SpawnActor(VehicleActorClass, SpawnerLoc, Helper::GetActorRotation(Spawner));
+					}
 				}
 			}
-			else
+			
+			if (aa)
 			{
 				static auto FortVehicleItemDefOffset = Spawner->GetOffset("FortVehicleItemDef");
 
@@ -817,7 +1006,7 @@ void Server::Hooks::TickFlush(UObject* thisNetDriver, float DeltaSeconds)
 			{
 				auto ClassActors = Helper::GetAllActorsOfClass(Class);
 
-				std::cout << "Size; " << ClassActors.Num() << '\n';
+				std::cout << "Size: " << ClassActors.Num() << '\n';
 
 				for (int i = 0; i < ClassActors.Num(); i++)
 				{
@@ -832,12 +1021,20 @@ void Server::Hooks::TickFlush(UObject* thisNetDriver, float DeltaSeconds)
 						else
 							CorrectLocation.dV.Z += 50;
 
-						/* auto LootDrops = Looting::PickLootDrops(TierGroup);
+						EFortPickupSourceTypeFlag SourceTypeFlag = EFortPickupSourceTypeFlag::FloorLoot;
+
+#ifdef TEST_NEW_LOOTING
+
+						auto LootDrops = Looting::PickLootDrops(TierGroup);
 
 						for (auto& LootDrop : LootDrops)
 						{
-							Helper::SummonPickup(nullptr, LootDrop.first, CorrectLocation, EFortPickupSourceTypeFlag::FloorLoot, EFortPickupSpawnSource::Unset, LootDrop.second, true);
-						} */
+							Helper::SummonPickup(nullptr, LootDrop.first, CorrectLocation, SourceTypeFlag, EFortPickupSpawnSource::Unset, LootDrop.second, true);
+						}
+
+						continue;
+
+#endif
 
 						bool ShouldSpawn = RandomBoolWithWeight(0.3f);
 
@@ -849,7 +1046,7 @@ void Server::Hooks::TickFlush(UObject* thisNetDriver, float DeltaSeconds)
 							{
 								auto Ammo = Looting::GetRandomItem(ItemType::Ammo);
 
-								MainPickup = Helper::SummonPickup(nullptr, Ammo.Definition, CorrectLocation, EFortPickupSourceTypeFlag::FloorLoot,
+								MainPickup = Helper::SummonPickup(nullptr, Ammo.Definition, CorrectLocation, SourceTypeFlag,
 									EFortPickupSpawnSource::Unset, Ammo.DropCount);
 							}
 
@@ -857,7 +1054,7 @@ void Server::Hooks::TickFlush(UObject* thisNetDriver, float DeltaSeconds)
 							{
 								auto Trap = Looting::GetRandomItem(ItemType::Trap);
 
-								MainPickup = Helper::SummonPickup(nullptr, Trap.Definition, CorrectLocation, EFortPickupSourceTypeFlag::FloorLoot,
+								MainPickup = Helper::SummonPickup(nullptr, Trap.Definition, CorrectLocation, SourceTypeFlag,
 									EFortPickupSpawnSource::Unset, Trap.DropCount);
 							}
 
@@ -865,7 +1062,7 @@ void Server::Hooks::TickFlush(UObject* thisNetDriver, float DeltaSeconds)
 							{
 								auto Consumable = Looting::GetRandomItem(ItemType::Consumable);
 
-								MainPickup = Helper::SummonPickup(nullptr, Consumable.Definition, CorrectLocation, EFortPickupSourceTypeFlag::FloorLoot,
+								MainPickup = Helper::SummonPickup(nullptr, Consumable.Definition, CorrectLocation, SourceTypeFlag,
 									EFortPickupSpawnSource::Unset, Consumable.DropCount);
 							}
 
@@ -873,13 +1070,13 @@ void Server::Hooks::TickFlush(UObject* thisNetDriver, float DeltaSeconds)
 							{
 								auto Weapon = Looting::GetRandomItem(ItemType::Weapon);
 
-								MainPickup = Helper::SummonPickup(nullptr, Weapon.Definition, CorrectLocation, EFortPickupSourceTypeFlag::FloorLoot, EFortPickupSpawnSource::Unset, 1, true);
+								MainPickup = Helper::SummonPickup(nullptr, Weapon.Definition, CorrectLocation, SourceTypeFlag, EFortPickupSpawnSource::Unset, 1, true);
 
 								if (MainPickup)
 								{
 									auto AmmoDef = Helper::GetAmmoForDefinition(Weapon.Definition);
 
-									Helper::SummonPickup(nullptr, AmmoDef.first, CorrectLocation, EFortPickupSourceTypeFlag::FloorLoot,
+									Helper::SummonPickup(nullptr, AmmoDef.first, CorrectLocation, SourceTypeFlag,
 										EFortPickupSpawnSource::Unset, AmmoDef.second);
 								}
 							}
@@ -920,11 +1117,11 @@ char Server::Hooks::ValidationFailure(__int64* a1, __int64 a2)
 	return false;
 }
 
-UObject* GetViewTargetCameraManager(UObject* NonConstThis)
+/* UObject* GetViewTargetCameraManager(UObject* NonConstThis)
 {
 	return nullptr;
 
-	/* static auto PendingViewTargetOffset = NonConstThis->GetOffset("PendingViewTarget");
+	static auto PendingViewTargetOffset = NonConstThis->GetOffset("PendingViewTarget");
 	auto PendingViewTarget = Get<FTViewTarget>(NonConstThis, PendingViewTargetOffset);
 
 	static auto PCOwnerOffset = NonConstThis->GetOffset("PCOwner");
@@ -942,8 +1139,8 @@ UObject* GetViewTargetCameraManager(UObject* NonConstThis)
 	auto ViewTarget = Get<FTViewTarget>(NonConstThis, ViewTargetOffset);
 
 	CheckViewTarget(ViewTarget, PCOwner);
-	return ViewTarget->Target; */
-}
+	return ViewTarget->Target; 
+} */
 
 UObject* Server::Hooks::GetViewTarget(UObject* PC, __int64 Unused, __int64 a3)
 {

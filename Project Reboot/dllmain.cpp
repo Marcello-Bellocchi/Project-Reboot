@@ -3,6 +3,7 @@
 #include <iostream>
 #include <fstream>
 
+#include "ai.h"
 #include "patterns.h"
 #include "server.h"
 #include "helper.h"
@@ -16,10 +17,26 @@
 #include "interaction.h"
 #include <intrin.h>
 
+#ifdef MILXNOR_H
+#include "milxnor.h"
+#endif
+
 // DEFINE_LOG_CATEGORY_STATIC(LogInit, ELogLevel::All)
 
 __int64 rettrue() { return 1; }
 __int64 retfalse() { return 0; }
+__int64 printretandretfalse()
+{
+    if (Defines::test2)
+    {
+        auto retaddy = __int64(_ReturnAddress()) - __int64(GetModuleHandleW(0));
+
+        if (retaddy != 0x1b0f70f)
+            std::cout << retaddy << '\n'; // std::format("0x{:x}\n", retaddy);
+    }
+
+    return 0;
+}
 
 DWORD WINAPI Initialize(LPVOID)
 {
@@ -28,10 +45,13 @@ DWORD WINAPI Initialize(LPVOID)
         AllocConsole();
 
         FILE* stream;
-        freopen_s(&stream, "CONOUT$", "w+", stdout);
+        std::string out = "CONOUT$";
+        freopen_s(&stream, out.c_str(), "w+", stdout);
 
         SetConsoleTitleA("Project Reboot V2");
     }
+
+    std::ios::sync_with_stdio(false);
 
     // Log::Init();
 
@@ -42,6 +62,11 @@ DWORD WINAPI Initialize(LPVOID)
     }
 
     std::cout << std::format("Base Address 0x{:x}\n", (uintptr_t)GetModuleHandleW(0));
+
+    std::ofstream aaa("baseaddress.log", std::ios_base::app);
+
+    if (aaa.is_open())
+        aaa << std::format("Base: 0x{:x}", (uintptr_t)GetModuleHandleW(0)) << '\n';
 
     if (!InitializePatterns())
     {
@@ -103,6 +128,18 @@ DWORD WINAPI Initialize(LPVOID)
         MH_EnableHook((PVOID)afq);
     }
 
+    static auto CheckPawnOverlapAddress = Memory::FindPattern("48 8B C4 48 89 58 08 48 89 70 10 57 48 81 EC ? ? ? ? 48 8B BA ? ? ? ? 48 8B DA 0F 29 70 E8 48 8B F1 0F");
+
+    if (!CheckPawnOverlapAddress)
+        CheckPawnOverlapAddress = Memory::FindPattern("48 8B C4 57 48 81 EC ? ? ? ? 4C 8B 82 ? ? ? ? 48 8B F9 0F 29 70 E8 0F 29 78 D8 44 0F 29 40 ? F3"); // s4
+
+    std::cout << "CheckPawnOverlapAddress: " << CheckPawnOverlapAddress << '\n';
+
+    MH_CreateHook((PVOID)CheckPawnOverlapAddress, retfalse, nullptr); // This only happens with StartPlay/StartMatch and on older versions.
+    MH_EnableHook((PVOID)CheckPawnOverlapAddress);
+
+    auto Base = __int64(GetModuleHandleW(0));
+
     // if (false)
     {
         bool bIsSettingGIsClient = true;
@@ -127,8 +164,8 @@ DWORD WINAPI Initialize(LPVOID)
 
             else if (Engine_Version == 425)
             {
-                GIsClientAddr = Memory::FindPattern("80 3D ? ? ? ? ? 41 0F B6 E9 41 0F B6 F8", true, 2);
-                GIsServerAddr = Memory::FindPattern("80 3D ? ? ? ? ? 75 0D F6 83 ? ? ? ? ? 0F", true, 2); // 8.51
+                GIsClientAddr = Memory::FindPattern("80 3D ? ? ? ? ? 74 04 84 DB 75 15 80 3D ? ? ? ? ? 0F", true, 2);
+                GIsServerAddr = Memory::FindPattern("80 3D ? ? ? ? ? 0F 84 ? ? ? ? 84 C0 0F 84 ? ? ? ? 49 8B", true, 2);
             }
 
             else if (Engine_Version == 500)
@@ -137,9 +174,17 @@ DWORD WINAPI Initialize(LPVOID)
                 GIsServerAddr = Memory::FindPattern("80 3D ? ? ? ? ? 0F 85 ? ? ? ? F6 83", true, 2);
             }
 
-            std::cout << "GIsClientSig: " << GIsClientAddr << '\n';
+            if (Fortnite_Version == 12.41)
+            {
+                GIsClientAddr = __int64(GetModuleHandleW(0)) + 0x8237B86;
+                GIsServerAddr = __int64(GetModuleHandleW(0)) + 0x8237B87;
+            }
+
+            std::cout << "GIsClientAddr: " << GIsClientAddr << '\n';
             std::cout << "GIsServerAddr: " << GIsServerAddr << '\n';
-            // std::cout << "aFTER: " << GIsClientAddr << '\n';
+
+            std::cout << std::format("GIsClientAddr: 0x{:x}\n", (uintptr_t)GIsClientAddr - Base);
+            std::cout << std::format("GIsServerAddr: 0x{:x}\n", (uintptr_t)GIsServerAddr - Base);
 
             if (GIsClientAddr)
             {
@@ -163,11 +208,17 @@ DWORD WINAPI Initialize(LPVOID)
                 MH_EnableHook((PVOID)IsGameServerForEvent);
             }
 
+            if (Fortnite_Version == 12.41)
+            {
+                auto skidder = __int64(GetModuleHandleW(0) + 0x42ACE40);
+
+                MH_CreateHook((PVOID)skidder, rettrue, nullptr);
+                MH_EnableHook((PVOID)skidder);
+            }
+
             bSetGIsClientSuccessful = GIsClientAddr;
         }
     }
-
-    CreateThread(0, 0, GuiThread, 0, 0, 0);
 
     MH_CreateHook((PVOID)CanActivateAbilityAddress, rettrue, nullptr); // TODO: Find a better fix
     MH_EnableHook((PVOID)CanActivateAbilityAddress);
@@ -210,53 +261,84 @@ DWORD WINAPI Initialize(LPVOID)
     std::cout << "SizeOfPredictionKey: " << Helper::GetSizeOfClass(FindObjectSlow("ScriptStruct /Script/GameplayAbilities.PredictionKey", false)) << '\n';
     std::cout << "SizeOfItemEntryStruct: " << Helper::GetSizeOfClass(FFortItemEntry::ItemEntryStruct) << '\n';
     
+    auto aasig = Memory::FindPattern("48 89 5C 24 ? 48 89 74 24 ? 57 48 83 EC 40 48 89 11 48 8B D9 48 8B 42 30 48 85 C0 75 07 48 8B 82 ? ? ? ? 48");
+
+    if (!aasig)
+        aasig = Memory::FindPattern("48 89 5C 24 ? 48 89 74 24 ? 57 48 83 EC 40 48 89 11");
+
+    std::cout << std::format("NetViewerConstructor: 0x{:x}\n", (uintptr_t)aasig - Base);
+
     // Level.Free();
 
     std::cout << "Full Version: " << Helper::GetEngineVersion().ToString() << '\n';
     std::cout << std::format("Engine Version {} Version {} CL {}\n", Helper::GetEngineVer(), Helper::GetFortniteVersion(), Helper::GetNetCL());
 
-    auto matchmaking = Memory::FindPattern("83 BD ? ? ? ? 01 7F 18 49 8D 4D D8 48 8B D6 E8 ? ? ? ? 48");
-
-    matchmaking = matchmaking ? matchmaking : Memory::FindPattern("83 7D 88 01 7F 0D 48 8B CE E8");
-
-    Defines::bMatchmakingSupported = matchmaking && Engine_Version >= 420;
-    int idx = 0;
-
-    if (Defines::bMatchmakingSupported) // now check if it leads to the right place and where the jg is at
+    if (Fortnite_Version != 22.4)
     {
-        for (int i = 0; i < 9; i++)
+        auto matchmaking = Memory::FindPattern("83 BD ? ? ? ? 01 7F 18 49 8D 4D D8 48 8B D6 E8 ? ? ? ? 48");
+
+        matchmaking = matchmaking ? matchmaking : Memory::FindPattern("83 7D 88 01 7F 0D 48 8B CE E8");
+
+        Defines::bMatchmakingSupported = matchmaking && Engine_Version >= 420;
+        int idx = 0;
+
+        if (Defines::bMatchmakingSupported) // now check if it leads to the right place and where the jg is at
         {
-            auto byte = (uint8_t*)(matchmaking + i);
+            for (int i = 0; i < 9; i++)
+            {
+                auto byte = (uint8_t*)(matchmaking + i);
+
+                if (IsBadReadPtr(byte))
+                    continue;
+
+                // std::cout << std::format("[{}] 0x{:x}\n", i, (int)*byte);
+
+                if (*byte == 0x7F)
+                {
+                    Defines::bMatchmakingSupported = true;
+                    idx = i;
+                    break;
+                }
+
+                Defines::bMatchmakingSupported = false;
+            }
+        }
+
+        std::cout << "Matchmaking will " << (Defines::bMatchmakingSupported ? "be supported\n" : "not be supported\n");
+
+        if (Defines::bMatchmakingSupported)
+        {
+            std::cout << "idx: " << idx << '\n';
+
+            auto before = (uint8_t*)(matchmaking + idx);
+
+            std::cout << "before byte: " << (int)*before << '\n';
+
+            *before = 0x74;
+        }
+    }
+    /* else
+    {
+        auto sigg = Memory::FindPattern("83 7C 24 ? ? 0F 8F ? ? ? ? 44 39 3D ? ? ? ? 41 8A DF 74 33 48 8B 0D ? ? ? ? 48 85 C9 74 27");
+
+        for (int i = 0; i < 100; i++)
+        {
+            auto byte = (uint8_t*)(sigg + i);
 
             if (IsBadReadPtr(byte))
                 continue;
 
-            // std::cout << std::format("[{}] 0x{:x}\n", i, (int)*byte);
-
-            if (*byte == 0x7F)
+            if (*byte == 0x1)
             {
-                Defines::bMatchmakingSupported = true;
-                idx = i;
+                std::cout << "found!\n";
+                *byte = 0x5;
                 break;
             }
-
-            Defines::bMatchmakingSupported = false;
         }
-    }
+    } */
 
-    std::cout << "Matchmaking will " << (Defines::bMatchmakingSupported ? "be supported\n" : "not be supported\n");
-
-    if (Defines::bMatchmakingSupported)
-    {
-        std::cout << "idx: " << idx << '\n';
-
-        auto before = (uint8_t*)(matchmaking + idx);
-
-        std::cout << "before byte: " << (int)*before << '\n';
-
-        *before = 0x74;
-    }
-
+    std::cout << "patched!\n";
+  
     if (Defines::bIsGoingToPlayMainEvent)
     {
         if (Fortnite_Season == 16)
@@ -284,13 +366,13 @@ DWORD WINAPI Initialize(LPVOID)
 
                     for (int i = 0; i < AdditionalLevels->Num(); i++)
                     {
-                        auto AdditionalLevel = AdditionalLevels->At(i);
+                        auto& AdditionalLevel = AdditionalLevels->At(i);
 
                         auto CurrentLevelName = AdditionalLevel.ObjectID.AssetPathName.ToString();
                         std::cout << std::format("[{}] {}\n", i, CurrentLevelName);
                     }
 
-                    auto LevelToOpen = AdditionalLevels->At(AdditionalLevels->Num() - 1);
+                    auto& LevelToOpen = AdditionalLevels->At(AdditionalLevels->Num() - 1);
 
                     auto LevelName = LevelToOpen.ObjectID.AssetPathName.ToString();
 
@@ -314,7 +396,11 @@ DWORD WINAPI Initialize(LPVOID)
         }
     }
 
+    // Defines::MapName = "Creative_NoApollo_Terrain";
+
     std::cout << "skidda!\n";
+
+    CreateThread(0, 0, GuiThread, 0, 0, 0);
 
     while (Defines::SecondsUntilTravel > 0)
     {
@@ -329,6 +415,11 @@ DWORD WINAPI Initialize(LPVOID)
 
     std::cout << "PC: " << PC << '\n';
 
+    std::ofstream baiafgq("rpcs.log", std::ios_base::app);
+    
+    if (baiafgq.is_open())
+        baiafgq << "\n\nNEW\n\n";
+
     static auto SwitchLevel = FindObject<UFunction>("/Script/Engine.PlayerController.SwitchLevel");
 
     std::wstring LevelWStr = std::wstring(Defines::MapName.begin(), Defines::MapName.end());
@@ -339,13 +430,31 @@ DWORD WINAPI Initialize(LPVOID)
 
     Defines::bTraveled = true;
 
-    // if (Fortnite_Version <= 11.30) // todo test this
-        // AddHook("/Script/FortniteGame.FortPlayerControllerAthena.ServerClientIsReadyToRespawn", ServerClientIsReadyToRespawn);
+    if (false)
+    {
+        if (Fortnite_Version <= 11.30) // todo test this
+        {
+            static auto fna = FindObject<UFunction>("/Script/FortniteGame.FortPlayerControllerAthena.ServerClientIsReadyToRespawn");
 
+            if (fna)
+                AddHook("/Script/FortniteGame.FortPlayerControllerAthena.ServerClientIsReadyToRespawn", ServerClientIsReadyToRespawn);
+            else
+                AddHook("/Script/FortniteGame.FortPlayerControllerAthena.ServerClientIsReadyToRespawn", ServerClientIsReadyToRespawn);
+        }
+    }
+
+    AddHook("/Script/FortniteGame.FortPlayerPawn.ServerChoosePart", ServerChoosePart);
+    AddHook("/Script/Engine.PlayerController.ServerChangeName", UFuncRetTrue);
     AddHook("/Script/Engine.GameModeBase.HandleStartingNewPlayer", HandleStartingNewPlayer);
     AddHook("/Script/Engine.GameMode.ReadyToStartMatch", ReadyToStartMatch);
     AddHook("/Script/Engine.PlayerController.ServerAcknowledgePossession", ServerAcknowledgePossession);
     AddHook("/Script/FortniteGame.FortPlayerController.ServerReadyToStartMatch", ServerReadyToStartMatch);
+
+#ifdef MILXNOR_H
+    InitializeMilxnorHooks();
+#endif
+
+    // AddHook("/Script/FortniteGame.FortPlayerPawn.ServerUpdateVehicleInputStateUnreliable", ServerUpdateVehicleInputStateUnreliable);
 
     AddHook("/Script/FortniteGame.FortPlayerControllerAthena.ServerGiveCreativeItem", ServerGiveCreativeItem);
 
@@ -358,12 +467,14 @@ DWORD WINAPI Initialize(LPVOID)
     AddHook("/Script/FortniteGame.FortPlayerController.ServerExecuteInventoryWeapon", Inventory::ServerExecuteInventoryWeapon);
 
     AddHook("/Script/FortniteGame.FortPlayerController.ServerCreateBuildingActor", Build::ServerCreateBuildingActor);
-    AddHook("/Script/FortniteGame.FortDecoTool.ServerSpawnDeco", Build::ServerSpawnDeco);
+    // AddHook("/Script/FortniteGame.FortDecoTool.ServerSpawnDeco", Build::ServerSpawnDeco);
 
     AddHook(Engine_Version < 423 ? "/Script/FortniteGame.FortPlayerController.ServerAttemptInteract" :
         "/Script/FortniteGame.FortControllerComponent_Interaction.ServerAttemptInteract", Interaction::ServerAttemptInteract);
 
     AddHook("/Script/FortniteGame.FortPlayerController.ServerLoadingScreenDropped", ServerLoadingScreenDropped);
+    AddHook("/Script/FortniteGame.FortPlayerController.ServerCheat", ServerCheat);
+    AddHook("/Script/FortniteGame.FortPlayerController.ServerCheatAll", UFuncRetTrue);
 
     if (Fortnite_Season < 20)
     {
@@ -386,15 +497,36 @@ DWORD WINAPI Initialize(LPVOID)
             : "/Script/FortniteGame.FortControllerComponent_Aircraft.ServerAttemptAircraftJump"), ServerAttemptAircraftJump);
 
     AddHook("/Script/FortniteGame.FortGameModeAthena.OnAircraftExitedDropZone", OnAircraftExitedDropZone);
+    AddHook(FindObject("/Script/FortniteGame.FortAthenaVehicle.ServerUpdateStateSync") ? "/Script/FortniteGame.FortAthenaVehicle.ServerUpdateStateSync" 
+        : "/Script/FortniteGame.FortPhysicsPawn.ServerUpdateStateSync", ServerUpdateStateSync);
+
+    AddHook("/Script/FortniteGame.FortPawn.NetMulticast_InvokeGameplayCueExecuted_WithParams", UFuncRetTrue);
+
     // /Script/FortniteGame.FortPlayerController:ServerDropAllItems
 
     // AddHook("/Script/FortniteGame.BuildingActor.OnDeathServer", OnDeathServer);
 
-    // AddHook("/Script/FortniteGame.FortPlayerController.ServerPlayEmoteItem", ServerPlayEmoteItem);
+    AddHook("/Script/FortniteGame.FortPlayerPawn.ServerSendZiplineState", ServerSendZiplineState);
+    AddHook("/Script/FortniteGame.FortPlayerController.ServerPlayEmoteItem", ServerPlayEmoteItem);
+    AddHook("/Game/Abilities/Emotes/GAB_Emote_Generic.GAB_Emote_Generic_C.K2_OnEndAbility", onendabilitydance);
+    // AddHook("/Script/Engine.GameModeBase.SpawnDefaultPawnFor", SpawnDefaultPawnFor);
+    // AddHook("/Script/FortniteGame.FortPlayerController.ServerRepairBuildingActor", Build::ServerRepairBuildingActor);
 
     // AddHook("/Script/FortniteGame.FortHeldObjectComponent.HandleOwnerAsBuildingActorDestroyed", HandleOwnerAsBuildingActorDestroyed);
 
+    // auto sigfgw4y = Memory::FindPattern("4C 8B DC 49 89 5B 20 55 56 57 48 83 EC 60 8A 81 ? ? ? ? 49 8B F8 48 8B DA 48 8B F1 3C 01 75 4A");
+
+    // MH_CreateHook((PVOID)sigfgw4y, AI::GetRandomLocationSafeToReach, (PVOID*)&AI::GetRandomLocationSafeToReachO);
+    // MH_EnableHook((PVOID)sigfgw4y);
+
+    // auto aF1F = (uintptr_t)(__int64(GetModuleHandleW(0)) + 0x2B6CD0);
+    // auto aF1F = Memory::FindPattern("48 83 EC 28 80 B9 ? ? ? ? ? 72 09 48 8B 01 FF 90 ? ? ? ? 32 C0 48 83 C4 28 C3");
+
+    // MH_CreateHook((PVOID)aF1F, rettrue, nullptr);
+    // MH_EnableHook((PVOID)aF1F);
+
     preoffsets::DeathCause = FindOffsetStruct("ScriptStruct /Script/FortniteGame.DeathInfo", "DeathCause");
+    preoffsets::bInitialized = FindOffsetStruct("ScriptStruct /Script/FortniteGame.DeathInfo", "bInitialized");
     preoffsets::FinisherOrDowner = FindOffsetStruct("ScriptStruct /Script/FortniteGame.DeathInfo", "FinisherOrDowner");
     preoffsets::bDBNO = FindOffsetStruct("ScriptStruct /Script/FortniteGame.DeathInfo", "bDBNO");
     preoffsets::Distance = FindOffsetStruct("ScriptStruct /Script/FortniteGame.DeathInfo", "Distance");
@@ -405,12 +537,32 @@ DWORD WINAPI Initialize(LPVOID)
     preoffsets::Place = FindOffsetStruct("Class /Script/FortniteGame.FortPlayerStateAthena", "Place");
     preoffsets::AlivePlayers = FindOffsetStruct("Class /Script/FortniteGame.FortGameModeAthena", "AlivePlayers");
     preoffsets::GamePhase = FindOffsetStruct("Class /Script/FortniteGame.FortGameStateAthena", "GamePhase");
+    preoffsets::WinningPlayerState = FindOffsetStruct("Class /Script/FortniteGame.FortGameStateAthena", "WinningPlayerState");
     preoffsets::DeathInfo = FindOffsetStruct("Class /Script/FortniteGame.FortPlayerStateAthena", "DeathInfo");
     preoffsets::LastFallDistance = FindOffsetStruct("Class /Script/FortniteGame.FortPlayerPawnAthena", "LastFallDistance");
     preoffsets::Tags = FindOffsetStruct("ScriptStruct /Script/FortniteGame.FortPlayerDeathReport", "Tags");
     preoffsets::KillerPawn = FindOffsetStruct("ScriptStruct /Script/FortniteGame.FortPlayerDeathReport", "KillerPawn");
     preoffsets::KillerPlayerState = FindOffsetStruct("ScriptStruct /Script/FortniteGame.FortPlayerDeathReport", "KillerPlayerState");
     preoffsets::TeamsLeft = FindOffsetStruct("Class /Script/FortniteGame.FortGameStateAthena", "TeamsLeft");
+    preoffsets::DamageCauser = FindOffsetStruct("ScriptStruct /Script/FortniteGame.FortPlayerDeathReport", "DamageCauser");
+
+    /* auto ahh = Memory::FindPattern("49 8B 04 24 48 8D 55 F8 49 8B CC FF 50 28 84 C0 0F 84 ? ? ? ? 48 89 7D A8 48 89 7D B0 48 89");
+
+    for (int i = 0; i < 22; i++)
+    {
+        auto byte = (uint8_t*)(ahh + i);
+        std::cout << std::format("[{}] 0x{:x}\n", i, (int)*byte);
+
+        if (*byte == 0x0F)
+        {
+            std::cout << "foudn!\n";
+            *(uint8_t*)(ahh + i + 1) = 0x87;
+        }
+
+        //*byte = 0x0;
+    } */
+
+    srand(time(0));
 
     return 0;
 }

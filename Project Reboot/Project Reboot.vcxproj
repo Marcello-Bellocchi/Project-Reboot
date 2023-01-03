@@ -169,6 +169,8 @@
     <ClCompile Include="..\other\inc\ImGui\imgui_tables.cpp" />
     <ClCompile Include="..\other\inc\ImGui\imgui_widgets.cpp" />
     <ClCompile Include="abilities.cpp" />
+    <ClCompile Include="ai.cpp" />
+    <ClCompile Include="moderation.cpp" />
     <ClCompile Include="build.cpp" />
     <ClCompile Include="calendar.cpp" />
     <ClCompile Include="calendar.h" />
@@ -195,6 +197,9 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="abilities.h" />
+    <ClInclude Include="ai.h" />
+    <ClInclude Include="json.hpp" />
+    <ClInclude Include="moderation.h" />
     <ClInclude Include="build.h" />
     <ClInclude Include="datatables.h" />
     <ClInclude Include="definitions.h" />
@@ -210,6 +215,7 @@
     <ClInclude Include="inventory.h" />
     <ClInclude Include="log.h" />
     <ClInclude Include="loot.h" />
+    <ClInclude Include="memcury.h" />
     <ClInclude Include="patterns.h" />
     <ClInclude Include="processevent.h" />
     <ClInclude Include="replication.h" />

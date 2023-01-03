@@ -3,6 +3,18 @@
 #include "structs.h"
 #include "log.h"
 
+// #define TEST_NEW_LOOTING
+// #define DEVELOPER_LOGGING
+// #define MILXNOR_H
+
+#ifdef DEVELOPER_LOGGING
+#define DEV_LOG(...) std::cout << std::format(__VA_ARGS__) << '\n';
+#else
+#define DEV_LOG(...)
+#endif
+
+#define LOG(...) std::cout << std::format(__VA_ARGS__) << '\n';
+
 namespace Defines
 {
 	inline bool bLogProcessEvent = false;
@@ -15,8 +27,11 @@ namespace Defines
 	inline bool bWipeInventoryOnAircraft = true;
 	inline bool bInfiniteAmmo = false;
 	inline bool bInfiniteMats = false;
-	inline bool bRandomCosmetics = true;
 	inline bool bIsSTW = false; // not implemeneted
+	inline bool bRespawning = false;
+	inline bool bLogRPCs = false;
+	inline bool bCustomLootpool = false;
+	inline bool bShouldRestart = false;
 
 	inline int SecondsUntilTravel = 5;
 
@@ -24,9 +39,12 @@ namespace Defines
 
 	inline std::string Playlist = Defines::bIsCreative ? ("/Game/Athena/Playlists/Creative/Playlist_PlaygroundV2.Playlist_PlaygroundV2") :
 		Defines::bIsPlayground ? ("/Game/Athena/Playlists/Playground/Playlist_Playground.Playlist_Playground") :
-			("/Game/Athena/Playlists/Playlist_DefaultSolo.Playlist_DefaultSolo");
+		("/Game/Athena/Playlists/Playlist_DefaultSolo.Playlist_DefaultSolo");
+		// ("/Game/Athena/Playlists/Playlist_DefaultDuo.Playlist_DefaultDuo");
+		// ("/Game/Athena/Playlists/DefaultBots/Playlist_Bots_DefaultSolo.Playlist_Bots_DefaultSolo");
+		// ("Playlist_SolidGold_Solo");
 
-	inline std::string urlForPortal = "https://images-ext-2.discordapp.net/external/fX-M8zr0lV9X4eU6cCKGbkbNhyLpSpSgLcUHrQX5BZw/https/i.ibb.co/F7VPqsW/image.png?width=1012&height=676";
+	inline std::string urlForPortal = "";
 
 	// DON'T CHANGE BELOW THIS
 
@@ -35,8 +53,11 @@ namespace Defines
 	inline bool bShouldSpawnVehicles = false;
 	inline bool bShouldSpawnForagedItems = false;
 	inline bool bIsRestarting = false;
+	inline bool bShouldStartBus = false;
 	inline UObject* Portal = nullptr;
 
+	inline float test1 = 0;
+	inline bool test2 = false;
 	inline int AmountOfRestarts = 0;
 
 	inline std::vector<std::pair<UObject*, std::string>> ObjectsToLoad;
@@ -51,10 +72,13 @@ namespace Defines
 	inline char (*KickPlayer)(UObject* GameSession, UObject* Controller, FText a3);
 	inline char (*ValidationFailure)(__int64* a1, __int64 a2);
 	inline __int64 (*NoReservation)(__int64* a1, __int64 a2, char a3, __int64 a4);
-	inline __int64 (*CantBuild)(UObject*, UObject*, FVector, FRotator, char, void*, char*);
-	inline __int64 (*CantBuildDouble)(UObject*, UObject*, DVector, DRotator, char, void*, char*);
+	inline __int64 (*CantBuild)(UObject*, UObject*, FVector, FRotator, char, TArray<UObject*>*, char*);
+	inline __int64 (*CantBuildDouble)(UObject*, UObject*, DVector, DRotator, char, TArray<UObject*>*, char*);
 	inline void (*HandleReloadCost)(UObject* Weapon, int AmountToRemove);
 	inline UObject* (*ReplaceBuildingActor)(UObject* BuildingSMActor, unsigned int a2, UObject* a3, unsigned int a4, int a5, unsigned __int8 bMirrored, UObject* Controller);
+
+	inline bool (*IsNetRelevantFor)(UObject*, UObject*, UObject*, void*); // end var is location
+	inline void (*ActorChannelClose)(UObject*, EChannelCloseReason);
 
 	inline void(*CallPreReplication)(UObject* actor, UObject* driver);
 	inline char(*ReplicateActor)(UObject* ActorChannel);
@@ -75,4 +99,22 @@ namespace Defines
 	inline FGameplayAbilitySpecHandle* (*GiveAbilityS13)(UObject* comp, FGameplayAbilitySpecHandle* outHandle, PadHexC0 inSpec);
 	inline FGameplayAbilitySpecHandle* (*GiveAbilityS14ABOVE)(UObject* comp, FGameplayAbilitySpecHandle* outHandle, PadHexE0 inSpec);
 	inline FGameplayAbilitySpecHandle* (*GiveAbilityS17ABOVE)(UObject* comp, FGameplayAbilitySpecHandle* outHandle, PadHexE8 inSpec);
+}
+
+template <typename T = void>
+T* Alloc(size_t Bytes)
+{
+	return (T*)FMemory::Realloc(nullptr, Bytes, 0);
+}
+
+inline FString* GetRequestURL(UObject* Connection)
+{
+	if (Engine_Version <= 420)
+		return (FString*)(__int64(Connection) + 432);
+	if (Fortnite_Season >= 5 && Engine_Version < 424)
+		return (FString*)(__int64(Connection) + 424);
+	else if (Engine_Version >= 424)
+		return (FString*)(__int64(Connection) + 440);
+
+	return nullptr;
 }

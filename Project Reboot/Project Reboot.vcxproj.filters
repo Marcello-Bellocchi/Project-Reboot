@@ -137,6 +137,12 @@
     <ClCompile Include="replication.cpp">
       <Filter>Source\Net</Filter>
     </ClCompile>
+    <ClCompile Include="ai.cpp">
+      <Filter>Source\Gameplay</Filter>
+    </ClCompile>
+    <ClCompile Include="moderation.cpp">
+      <Filter>Source\Net</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="gui.h">
@@ -207,6 +213,18 @@
     </ClInclude>
     <ClInclude Include="replication.h">
       <Filter>Headers\Net</Filter>
+    </ClInclude>
+    <ClInclude Include="ai.h">
+      <Filter>Headers\Gameplay</Filter>
+    </ClInclude>
+    <ClInclude Include="memcury.h">
+      <Filter>Headers\Util</Filter>
+    </ClInclude>
+    <ClInclude Include="moderation.h">
+      <Filter>Headers\Net</Filter>
+    </ClInclude>
+    <ClInclude Include="json.hpp">
+      <Filter>Third Party</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

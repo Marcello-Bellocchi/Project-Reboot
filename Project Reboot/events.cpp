@@ -39,6 +39,8 @@ UObject* GetEventScripting()
 		Scripting = FindObject("/Game/Athena/Maps/Athena_POI_Foundations.Athena_POI_Foundations:PersistentLevel.BP_FestivusManager");
 	else if (Fortnite_Version == 8.51)
 		Scripting = FindObject("/Game/Athena/Maps/Athena_POI_Foundations.Athena_POI_Foundations.PersistentLevel.BP_SnowScripting_2");
+	else if (Fortnite_Version == 9.40 || Fortnite_Version == 9.41)
+		Scripting = FindObject("/Game/Athena/Maps/Athena_POI_Foundations.Athena_POI_Foundations.PersistentLevel.BP_CattusDoggus_Scripting_2");
 	else if (Fortnite_Version == 10.40)
 		Scripting = FindObject("/Game/Athena/Maps/Athena_POI_Foundations.Athena_POI_Foundations.PersistentLevel.BP_NightNight_Scripting_2");
 	else if (Fortnite_Version == 11.30)
@@ -91,6 +93,19 @@ void Events::LoadEvent()
 		{
 			auto LoadSnowLevel = FindObject<UFunction>("/Game/Athena/Prototype/Blueprints/White/BP_SnowScripting.BP_SnowScripting_C.LoadSnowLevel");
 			Scripting->ProcessEvent(LoadSnowLevel);
+
+			bHasBeenLoaded = true;
+		}
+	}
+
+	else if (Fortnite_Version == 9.40 || Fortnite_Version == 9.41)
+	{
+		auto Scripting = GetEventScripting();
+
+		if (Scripting)
+		{
+			auto LoadCattusLevel = FindObject<UFunction>("/Game/Athena/Prototype/Blueprints/Cattus/BP_CattusDoggus_Scripting.BP_CattusDoggus_Scripting_C.LoadCattusLevel");
+			Scripting->ProcessEvent(LoadCattusLevel, &Condition);
 
 			bHasBeenLoaded = true;
 		}
@@ -448,6 +463,20 @@ void Events::StartEvent()
 			}
 		}
 
+		else if (Fortnite_Version == 9.40 || Fortnite_Version == 9.41)
+		{
+			auto Scripting = GetEventScripting();
+
+			if (Scripting)
+			{
+				auto bb = FindObject<UFunction>("/Game/Athena/Prototype/Blueprints/Cattus/BP_CattusDoggus_Scripting.BP_CattusDoggus_Scripting_C.OnReady_C11CA7624A74FBAEC54753A3C2BD4506");
+				Scripting->ProcessEvent(bb, &bbparms);
+
+				auto startevent = FindObject<UFunction>("/Game/Athena/Prototype/Blueprints/Cattus/BP_CattusDoggus_Scripting.BP_CattusDoggus_Scripting_C.startevent");
+				Scripting->ProcessEvent(startevent);
+			}
+		}
+
 		else if (Fortnite_Version == 10.40)
 		{
 			auto Scripting = GetEventScripting();
@@ -500,12 +529,19 @@ void Events::StartEvent()
 					auto BB = FindObject<UFunction>("/CycloneJerky/Gameplay/BP_Jerky_Scripting.BP_Jerky_Scripting_C.OnReady_093B6E664C060611B28F79B5E7052A39");
 					auto CC = FindObject<UFunction>("/CycloneJerky/Gameplay/BP_Jerky_Loader.BP_Jerky_Loader_C.OnReady_7FE9744D479411040654F5886C078D08");
 					auto loader_callstarteventonscripting = FindObject<UFunction>("/CycloneJerky/Gameplay/BP_Jerky_Loader.BP_Jerky_Loader_C.CallStartEventOnScripting");
+					auto DebugStartSequence = FindObject<UFunction>("/CycloneJerky/Gameplay/BP_Jerky_Parent.BP_Jerky_Parent_C.DebugStartSequence");
+					auto DD = FindObject<UFunction>("/Game/Athena/Prototype/Blueprints/Sky/BP_SkyJerk.BP_SkyJerk_C.OnReady_BF7D9B86447A86EF0458DDAF0DA3EE1A");
+
+					std::cout << "DebugStartSequence: " << DebugStartSequence << '\n';
 
 					Loader->ProcessEvent(CC, &bbparms);
 					Scripting->ProcessEvent(BB, &bbparms);
-					// Loader->ProcessEvent(loader_startevent, &SecondsSinceEventBegan);
-					// Scripting->ProcessEvent(scripting_startevent, &SecondsSinceEventBegan);
+					Loader->ProcessEvent(loader_startevent, &SecondsSinceEventBegan);
+					Scripting->ProcessEvent(scripting_startevent, &SecondsSinceEventBegan);
+					Scripting->ProcessEvent(DebugStartSequence, &SecondsSinceEventBegan);
 					Loader->ProcessEvent(loader_callstarteventonscripting, &SecondsSinceEventBegan);
+
+					std::cout << "aa!\n";
 				}
 			}
 		}
@@ -607,7 +643,7 @@ std::string Events::GetEventPlaylistName()
 		return "/Game/Athena/Playlists/Music/Playlist_Junior_32.Playlist_Junior_32";
 	else if (Fortnite_Version == 12.61)
 		return "/Game/Athena/Playlists/Fritter/Playlist_Fritter_High.Playlist_Fritter_High";
-	else if (Fortnite_Version <= 12.41)
+	else if (Engine_Version >= 422 && Fortnite_Version <= 12.41)
 		return "/Game/Athena/Playlists/Music/Playlist_Music_High.Playlist_Music_High";
 
 	return "/Game/Athena/Playlists/Playlist_DefaultSolo.Playlist_DefaultSolo";
@@ -616,7 +652,7 @@ std::string Events::GetEventPlaylistName()
 BothVector Events::GetSpawnLocation(bool* outSuccess)
 {
 	if (outSuccess)
-		*outSuccess = true;
+		*outSuccess = true; 
 
 	if (Fortnite_Version == 20.40)
 		return BothVector(DVector(-104890.109, 120585.164, 117040.789));
